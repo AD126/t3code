@@ -40,3 +40,6 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      - name: Smoke Test (t3 runtime)
+        run: bun run --cwd apps/t3 build && bun run smoke-test
