@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { parseCliOptions, readCliVersion } from "./cli";
+import { formatStartupError, parseCliOptions, readCliVersion } from "./cli";
 
 describe("parseCliOptions", () => {
   it("reads defaults from environment variables", () => {
@@ -85,5 +85,25 @@ describe("readCliVersion", () => {
   it("returns default when env and package file are unavailable", () => {
     const value = readCliVersion("/tmp/no-such-package.json", {});
     expect(value).toBe("0.1.0");
+  });
+});
+
+describe("formatStartupError", () => {
+  const options = parseCliOptions([], {}, "/workspace");
+
+  it("returns helpful guidance for port conflicts", () => {
+    const message = formatStartupError({ code: "EADDRINUSE" }, options);
+    expect(message).toContain("Port already in use");
+    expect(message).toContain("--backend-port");
+  });
+
+  it("returns error message when available", () => {
+    const message = formatStartupError(new Error("boom"), options);
+    expect(message).toBe("boom");
+  });
+
+  it("falls back to generic startup error text", () => {
+    const message = formatStartupError({}, options);
+    expect(message).toBe("Failed to start t3 runtime.");
   });
 });

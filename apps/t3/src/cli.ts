@@ -42,6 +42,11 @@ interface CliOptions {
   showVersion: boolean;
 }
 
+interface StartupErrorShape {
+  code?: unknown;
+  message?: unknown;
+}
+
 function readArgValue(args: string[], index: number, key: string): string {
   const value = args[index + 1];
   if (!value || value.startsWith("-")) {
@@ -49,6 +54,21 @@ function readArgValue(args: string[], index: number, key: string): string {
   }
 
   return value;
+}
+
+export function formatStartupError(error: unknown, options: CliOptions): string {
+  const candidate = error as StartupErrorShape;
+  const code = typeof candidate?.code === "string" ? candidate.code : undefined;
+
+  if (code === "EADDRINUSE") {
+    return `Port already in use. Try --backend-port ${options.backendPort + 1} --web-port ${options.webPort + 1} or stop the conflicting process.`;
+  }
+
+  if (error instanceof Error && error.message.length > 0) {
+    return error.message;
+  }
+
+  return "Failed to start t3 runtime.";
 }
 
 export function parseCliOptions(
@@ -349,9 +369,7 @@ async function main() {
   try {
     await runCli(options);
   } catch (error) {
-    process.stderr.write(
-      `${error instanceof Error ? error.message : "Failed to start t3 runtime."}\n`,
-    );
+    process.stderr.write(`${formatStartupError(error, options)}\n`);
     process.exit(1);
   }
 }
