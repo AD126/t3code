@@ -100,6 +100,11 @@ describe("parseCliOptions", () => {
     expect(disabled.noOpen).toBe(true);
   });
 
+  it("lets -o=true override truthy no-open environment defaults", () => {
+    const options = parseCliOptions(["-o=true"], { T3_NO_OPEN: "yes" }, "/workspace");
+    expect(options.noOpen).toBe(false);
+  });
+
   it("supports explicit equals-style --open boolean overrides", () => {
     const options = parseCliOptions(
       ["--open=false"],
