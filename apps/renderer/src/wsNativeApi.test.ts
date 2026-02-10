@@ -12,6 +12,7 @@ class MockWebSocket {
     message: "mock open failure",
   };
   static failConstruct = false;
+  static failConstructError: unknown = new Error("mock constructor failure");
   static failCloseBeforeOpen = false;
   static failCloseBeforeOpenEvent: { code?: number; reason?: string } = {
     code: WS_CLOSE_CODES.unauthorized,
@@ -25,7 +26,7 @@ class MockWebSocket {
 
   constructor(readonly url: string) {
     if (MockWebSocket.failConstruct) {
-      throw new Error("mock constructor failure");
+      throw MockWebSocket.failConstructError;
     }
     MockWebSocket.instances.push(this);
     queueMicrotask(() => {
@@ -130,6 +131,7 @@ describe("wsNativeApi", () => {
     MockWebSocket.failOpen = false;
     MockWebSocket.failOpenEvent = { message: "mock open failure" };
     MockWebSocket.failConstruct = false;
+    MockWebSocket.failConstructError = new Error("mock constructor failure");
     MockWebSocket.failCloseBeforeOpen = false;
     MockWebSocket.failCloseBeforeOpenEvent = {
       code: WS_CLOSE_CODES.unauthorized,
@@ -1977,6 +1979,28 @@ describe("wsNativeApi", () => {
     await expect(api.todos.list()).rejects.toThrow(
       "Failed to connect to local t3 runtime: websocket error (mock constructor failure).",
     );
+  });
+
+  it("uses non-Error constructor message when websocket construction throws", async () => {
+    setWindowSearch("?ws=ws%3A%2F%2F127.0.0.1%3A4493");
+    MockWebSocket.failConstruct = true;
+    MockWebSocket.failConstructError = { message: "object-constructor-failure" };
+    const { getOrCreateWsNativeApi } = await import("./wsNativeApi");
+    const api = getOrCreateWsNativeApi();
+
+    await expect(api.todos.list()).rejects.toThrow(
+      "Failed to connect to local t3 runtime: websocket error (object-constructor-failure).",
+    );
+  });
+
+  it("falls back to generic connect error when constructor message is whitespace", async () => {
+    setWindowSearch("?ws=ws%3A%2F%2F127.0.0.1%3A4494");
+    MockWebSocket.failConstruct = true;
+    MockWebSocket.failConstructError = { message: "   " };
+    const { getOrCreateWsNativeApi } = await import("./wsNativeApi");
+    const api = getOrCreateWsNativeApi();
+
+    await expect(api.todos.list()).rejects.toThrow("Failed to connect to local t3 runtime.");
   });
 
   it("recovers after websocket construction failure on next request", async () => {
