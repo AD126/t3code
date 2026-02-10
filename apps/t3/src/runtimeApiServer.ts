@@ -316,29 +316,14 @@ function resolveExistingDirectoryFromBase(
   label: string,
   baseDirectory: string,
 ): string {
+  if (typeof targetPath !== "string" || targetPath.trim().length === 0) {
+    throw new Error(`${label} must be a non-empty path.`);
+  }
+
   const candidate = path.isAbsolute(targetPath)
     ? path.resolve(targetPath)
     : path.resolve(baseDirectory, targetPath);
-  let stats: fs.Stats;
-  try {
-    stats = fs.statSync(candidate);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException | undefined)?.code;
-    if (code && code !== "ENOENT") {
-      throw new Error(`Failed to access ${label.toLowerCase()}: ${candidate} (${code})`, {
-        cause: error,
-      });
-    }
-    throw new Error(`${label} does not exist: ${candidate}`, {
-      cause: error,
-    });
-  }
-
-  if (!stats.isDirectory()) {
-    throw new Error(`${label} is not a directory: ${candidate}`);
-  }
-
-  return candidate;
+  return resolveExistingDirectory(candidate, label);
 }
 
 export async function startRuntimeApiServer(

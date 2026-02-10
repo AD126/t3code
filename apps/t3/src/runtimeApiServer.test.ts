@@ -1175,6 +1175,36 @@ describe("runtimeApiServer", () => {
     client.socket.close();
   });
 
+  it("returns structured errors when shell.openInEditor target is whitespace", async () => {
+    const server = await startRuntimeApiServer({
+      port: 0,
+      launchCwd: process.cwd(),
+    });
+    servers.push(server);
+
+    const client = await connectClient(server.wsUrl);
+    await client.nextMessage();
+
+    const response = await sendRequest(
+      client.socket,
+      client.nextMessage,
+      "shell-whitespace-path-1",
+      "shell.openInEditor",
+      {
+        cwd: "   ",
+        editor: "cursor",
+      },
+    );
+    expect(response.ok).toBe(false);
+    if (response.ok) {
+      throw new Error("Expected whitespace shell target request to fail.");
+    }
+    expect(response.error?.code).toBe("request_failed");
+    expect(response.error?.message).toContain("Editor target must be a non-empty path");
+
+    client.socket.close();
+  });
+
   it("returns structured errors for invalid terminal.run payloads", async () => {
     const server = await startRuntimeApiServer({
       port: 0,
@@ -1747,6 +1777,36 @@ describe("runtimeApiServer", () => {
     }
     expect(response.error?.code).toBe("request_failed");
     expect(response.error?.message).toContain("Working directory is not a directory");
+
+    client.socket.close();
+  });
+
+  it("returns structured errors when terminal cwd is whitespace", async () => {
+    const server = await startRuntimeApiServer({
+      port: 0,
+      launchCwd: process.cwd(),
+    });
+    servers.push(server);
+
+    const client = await connectClient(server.wsUrl);
+    await client.nextMessage();
+
+    const response = await sendRequest(
+      client.socket,
+      client.nextMessage,
+      "terminal-whitespace-cwd-1",
+      "terminal.run",
+      {
+        command: "pwd",
+        cwd: "   ",
+      },
+    );
+    expect(response.ok).toBe(false);
+    if (response.ok) {
+      throw new Error("Expected terminal whitespace cwd response to fail.");
+    }
+    expect(response.error?.code).toBe("request_failed");
+    expect(response.error?.message).toContain("Working directory must be a non-empty path");
 
     client.socket.close();
   });
