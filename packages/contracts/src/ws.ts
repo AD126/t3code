@@ -44,10 +44,24 @@ const wsResponseSchema = z
       });
     }
 
+    if (value.ok && value.result === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "response.result is required when ok=true",
+      });
+    }
+
     if (!value.ok && !value.error) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "response.error is required when ok=false",
+      });
+    }
+
+    if (!value.ok && value.result !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "response.result must be undefined when ok=false",
       });
     }
   });

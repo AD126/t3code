@@ -63,6 +63,16 @@ describe("wsServerMessageSchema", () => {
     ).toThrow();
   });
 
+  it("requires result for successful responses", () => {
+    expect(() =>
+      wsServerMessageSchema.parse({
+        type: "response",
+        id: "req-1",
+        ok: true,
+      }),
+    ).toThrow();
+  });
+
   it("rejects errors for successful responses", () => {
     expect(() =>
       wsServerMessageSchema.parse({
@@ -73,6 +83,21 @@ describe("wsServerMessageSchema", () => {
         error: {
           code: "unexpected",
           message: "should-not-be-present",
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects result payloads for failed responses", () => {
+    expect(() =>
+      wsServerMessageSchema.parse({
+        type: "response",
+        id: "req-1",
+        ok: false,
+        result: { status: "unexpected" },
+        error: {
+          code: "request_failed",
+          message: "expected-failure",
         },
       }),
     ).toThrow();
