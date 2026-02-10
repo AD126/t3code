@@ -79,6 +79,7 @@ Runtime command semantics:
 - In-flight renderer requests now surface unauthorized/replacement disconnect causes explicitly.
 - Renderer also fails in-flight requests immediately on websocket `error` events (without waiting for close) for faster feedback.
 - After reconnect, renderer ignores stale events from prior sockets to avoid cross-connection state corruption.
+- Initial websocket connect failures now include underlying socket error details when available.
 - Runtime validates request payloads with shared Zod contracts.
 - Codex execution sandbox policy (`read-only`, `workspace-write`, `danger-full-access`) is still selected per session startup options.
 - Static HTML responses are served with `Cache-Control: no-store`; built `/assets/*` files are served with long-lived immutable cache headers.
