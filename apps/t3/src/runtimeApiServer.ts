@@ -96,7 +96,7 @@ function responseSuccess(id: string, result: unknown): WsResponseMessage {
     type: "response",
     id,
     ok: true,
-    result,
+    result: result === undefined ? null : result,
   };
 }
 
