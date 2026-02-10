@@ -5,6 +5,6 @@ export default defineConfig({
   format: ["esm"],
   dts: true,
   clean: true,
-  noExternal: ["@acme/contracts"],
+  noExternal: ["@acme/contracts", "@acme/runtime-core"],
   outDir: "dist",
 });

@@ -35,4 +35,12 @@ describe("runtime architecture boundaries", () => {
 
     expect(fs.existsSync(legacyDesktopPackagePath)).toBe(false);
   });
+
+  it("keeps runtime-core bundled into published t3 runtime output", () => {
+    const tsupConfigPath = path.resolve(import.meta.dirname, "..", "tsup.config.ts");
+    const tsupConfigSource = fs.readFileSync(tsupConfigPath, "utf8");
+
+    expect(tsupConfigSource).toContain("\"@acme/runtime-core\"");
+    expect(tsupConfigSource).toContain("noExternal");
+  });
 });
