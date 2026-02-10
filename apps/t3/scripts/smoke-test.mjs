@@ -441,6 +441,18 @@ async function main() {
         `Smoke test failed: expected wildcard If-Match + If-None-Match status 304, received ${ifMatchWildcardWithNoneMatchAsset.status}.`,
       );
     }
+    const ifMatchWildcardWithNoneMatchHeadAsset = await fetch(assetUrl, {
+      method: "HEAD",
+      headers: {
+        "If-Match": "*",
+        "If-None-Match": assetEtag,
+      },
+    });
+    if (ifMatchWildcardWithNoneMatchHeadAsset.status !== 304) {
+      throw new Error(
+        `Smoke test failed: expected HEAD wildcard If-Match + If-None-Match status 304, received ${ifMatchWildcardWithNoneMatchHeadAsset.status}.`,
+      );
+    }
     const ifMatchMismatchWithNoneMatchAsset = await fetch(assetUrl, {
       headers: {
         "If-Match": "\"definitely-different-etag\"",
