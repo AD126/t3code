@@ -125,7 +125,7 @@ function readPersistedState(): AppState {
       ...hydrated,
       threads,
       activeThreadId,
-      threadsHydrated: threads.length > 0,
+      threadsHydrated: false,
       diffOpen: false,
     };
   } catch {

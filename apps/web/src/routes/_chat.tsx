@@ -12,13 +12,13 @@ function ChatRouteLayout() {
   const routeThreadId = typeof params.threadId === "string" ? params.threadId : null;
 
   useEffect(() => {
-    if (routeThreadId || !state.activeThreadId) return;
+    if (routeThreadId || !state.activeThreadId || !state.threadsHydrated) return;
     void navigate({
       to: "/$threadId",
       params: { threadId: state.activeThreadId },
       replace: true,
     });
-  }, [navigate, routeThreadId, state.activeThreadId]);
+  }, [navigate, routeThreadId, state.activeThreadId, state.threadsHydrated]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground isolate">
