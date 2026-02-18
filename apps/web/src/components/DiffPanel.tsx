@@ -358,7 +358,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           variant="outline"
           size="xs"
           value={[diffRenderMode]}
-          onValueChange={(value) => setDiffRenderMode(value[0] as DiffRenderMode)}
+          onValueChange={(value) => { if (value.length > 0) setDiffRenderMode(value[0] as DiffRenderMode); }}
         >
           <Toggle aria-label="Stacked diff view" value="stacked">
             <Rows3Icon className="size-3" />
