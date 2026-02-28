@@ -2,6 +2,7 @@ import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import readline from "node:readline";
+import serverPackage from "../package.json";
 
 import {
   ApprovalRequestId,
@@ -200,7 +201,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         clientInfo: {
           name: "t3code_desktop",
           title: "T3 Code Desktop",
-          version: "0.1.0",
+          version: serverPackage.version,
         },
         capabilities: {
           experimentalApi: false,

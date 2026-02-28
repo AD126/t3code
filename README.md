@@ -56,11 +56,16 @@ T3CODE_DEV_INSTANCE=feature-xyz bun run dev:desktop
 bun run build
 bun run start
 
+# Publish an alpha build without touching npm "latest"
+bun run version:alpha
+bun run publish:alpha
+
 # Build a shareable macOS .dmg (arm64 by default)
 bun run dist:desktop:dmg
 
 # Or from any project directory after publishing:
 npx t3
+npx t3@alpha
 ```
 
 ## Scripts
@@ -75,6 +80,8 @@ npx t3
 - `bun run build` — Builds contracts, web app, and server through Turbo.
 - `bun run typecheck` — Strict TypeScript checks for all packages.
 - `bun run test` — Runs workspace tests.
+- `bun run version:alpha` — Sets or increments the `t3` package to an `x.y.z-alpha.n` prerelease.
+- `bun run publish:alpha` — Builds `t3` and publishes it with the npm `alpha` dist-tag, leaving `latest` unchanged.
 - `bun run dist:desktop:dmg` — Builds a shareable macOS `.dmg` into `./release`.
 - `bun run dist:desktop:dmg:x64` — Builds an Intel macOS `.dmg`.
 
