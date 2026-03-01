@@ -9,13 +9,20 @@
 import {
   type ProviderEvent,
   type ProviderRuntimeEvent,
-  type ProviderRuntimeTurnStatus,
-  type ProviderRuntimeToolKind,
-  ProviderItemId,
+  type CanonicalItemType,
+  type CanonicalRequestType,
+  type RuntimeContentStreamKind,
+  type RuntimeEventRawSource,
+  type RuntimeTurnState,
   ProviderApprovalDecision,
   ProviderSessionId,
   ProviderThreadId,
   ProviderTurnId,
+  RuntimeItemId,
+  RuntimeRequestId,
+  RuntimeSessionId,
+  ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 import { Effect, Layer, Queue, Schema, Stream } from "effect";
 
@@ -96,7 +103,11 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function toTurnStatus(value: unknown): ProviderRuntimeTurnStatus | undefined {
+function asNumber(value: unknown): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
+
+function toTurnState(value: unknown): RuntimeTurnState | undefined {
   switch (value) {
     case "completed":
     case "failed":
@@ -126,22 +137,52 @@ function shouldDropItemType(type: string): boolean {
   return type === "work" || type.startsWith("work ");
 }
 
-function toolMeta(type: string):
-  | {
-      readonly toolKind: ProviderRuntimeToolKind;
-      readonly title: string;
-    }
-  | undefined {
-  if (type.includes("command")) {
-    return { toolKind: "command", title: "Command run" };
-  }
-  if (type.includes("file change")) {
-    return { toolKind: "file-change", title: "File change" };
-  }
-  if (type.includes("tool")) {
-    return { toolKind: "other", title: "Tool call" };
-  }
+function toCanonicalItemType(normalizedType: string): CanonicalItemType | undefined {
+  if (normalizedType.includes("agent message")) return "assistant_message";
+  if (normalizedType.includes("command")) return "command_execution";
+  if (normalizedType.includes("file change")) return "file_change";
+  if (normalizedType.includes("mcp") && normalizedType.includes("tool")) return "mcp_tool_call";
+  if (normalizedType.includes("web search")) return "web_search";
+  if (normalizedType.includes("tool")) return "dynamic_tool_call";
   return undefined;
+}
+
+function isToolItemType(itemType: CanonicalItemType): boolean {
+  return (
+    itemType === "command_execution" ||
+    itemType === "file_change" ||
+    itemType === "mcp_tool_call" ||
+    itemType === "dynamic_tool_call" ||
+    itemType === "web_search"
+  );
+}
+
+function titleForItemType(itemType: CanonicalItemType): string {
+  switch (itemType) {
+    case "command_execution":
+      return "Command run";
+    case "file_change":
+      return "File change";
+    case "mcp_tool_call":
+      return "MCP tool call";
+    case "web_search":
+      return "Web search";
+    case "dynamic_tool_call":
+      return "Tool call";
+    default:
+      return "Item";
+  }
+}
+
+function toCanonicalRequestType(requestKind: string): CanonicalRequestType {
+  switch (requestKind) {
+    case "command":
+      return "command_execution_approval";
+    case "file-change":
+      return "file_change_approval";
+    default:
+      return "unknown";
+  }
 }
 
 function itemDetail(
@@ -170,84 +211,39 @@ function itemDetail(
   return undefined;
 }
 
-function mapMessageCompletedEvent(event: ProviderEvent): ProviderRuntimeEvent | undefined {
-  if (event.method !== "item/completed") {
-    return undefined;
-  }
-
-  const payload = asObject(event.payload);
-  const item = asObject(payload?.item);
-  if (!item) {
-    return undefined;
-  }
-
-  const normalizedType = normalizeItemType(item.type ?? item.kind);
-  if (!normalizedType.includes("agent message")) {
-    return undefined;
-  }
-
-  const itemId = event.itemId ?? asString(item.id);
-  if (!itemId) {
-    return undefined;
-  }
+function makeEventBase(event: ProviderEvent) {
+  const rawSource: RuntimeEventRawSource =
+    event.kind === "request"
+      ? "codex.app-server.request"
+      : "codex.app-server.notification";
 
   return {
-    type: "message.completed",
     eventId: event.id,
     provider: event.provider,
-    sessionId: event.sessionId,
+    sessionId: RuntimeSessionId.makeUnsafe(event.sessionId),
     createdAt: event.createdAt,
-    itemId: ProviderItemId.makeUnsafe(itemId),
-    ...(event.threadId ? { threadId: event.threadId } : {}),
-    ...(event.turnId ? { turnId: event.turnId } : {}),
-  };
-}
-
-function mapToolEvent(event: ProviderEvent): ProviderRuntimeEvent | undefined {
-  if (event.method !== "item/started" && event.method !== "item/completed") {
-    return undefined;
-  }
-  const payload = asObject(event.payload);
-  const item = asObject(payload?.item);
-  if (!item) {
-    return undefined;
-  }
-  const normalizedType = normalizeItemType(item.type ?? item.kind);
-  if (shouldDropItemType(normalizedType)) {
-    return undefined;
-  }
-  const meta = toolMeta(normalizedType);
-  if (!meta) {
-    return undefined;
-  }
-
-  const eventBase = {
-    eventId: event.id,
-    provider: event.provider,
-    sessionId: event.sessionId,
-    createdAt: event.createdAt,
-    ...(event.threadId ? { threadId: event.threadId } : {}),
-    ...(event.turnId ? { turnId: event.turnId } : {}),
-    ...(event.itemId ? { itemId: event.itemId } : {}),
-    toolKind: meta.toolKind,
-    title: meta.title,
-    ...(payload ? { detail: itemDetail(item, payload) } : {}),
+    ...(event.threadId !== undefined ? { threadId: ThreadId.makeUnsafe(event.threadId) } : {}),
+    ...(event.turnId !== undefined ? { turnId: TurnId.makeUnsafe(event.turnId) } : {}),
+    ...(event.itemId !== undefined ? { itemId: RuntimeItemId.makeUnsafe(event.itemId) } : {}),
+    ...(event.requestId !== undefined
+      ? { requestId: RuntimeRequestId.makeUnsafe(event.requestId) }
+      : {}),
+    providerRefs: {
+      providerSessionId: event.sessionId,
+      ...(event.threadId !== undefined ? { providerThreadId: event.threadId } : {}),
+      ...(event.turnId !== undefined ? { providerTurnId: event.turnId } : {}),
+      ...(event.itemId !== undefined ? { providerItemId: event.itemId } : {}),
+    },
+    raw: {
+      source: rawSource,
+      method: event.method,
+      payload: event.payload,
+    },
   } as const;
-
-  if (event.method === "item/started") {
-    return {
-      type: "tool.started",
-      ...eventBase,
-    };
-  }
-
-  return {
-    type: "tool.completed",
-    ...eventBase,
-  };
 }
 
 function mapToRuntimeEvents(event: ProviderEvent): ReadonlyArray<ProviderRuntimeEvent> {
+  const base = makeEventBase(event);
   const payload = asObject(event.payload);
   const turn = asObject(payload?.turn);
 
@@ -257,15 +253,13 @@ function mapToRuntimeEvents(event: ProviderEvent): ReadonlyArray<ProviderRuntime
     }
     return [
       {
-        type: "runtime.error",
-        eventId: event.id,
-        provider: event.provider,
-        sessionId: event.sessionId,
-        createdAt: event.createdAt,
-        ...(event.threadId ? { threadId: event.threadId } : {}),
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        ...(event.itemId ? { itemId: event.itemId } : {}),
-        message: event.message,
+        ...base,
+        type: "runtime.error" as const,
+        payload: {
+          message: event.message,
+          class: "provider_error" as const,
+          ...(payload ? { detail: payload } : {}),
+        },
       },
     ];
   }
@@ -275,17 +269,14 @@ function mapToRuntimeEvents(event: ProviderEvent): ReadonlyArray<ProviderRuntime
       asString(payload?.command) ?? asString(payload?.reason) ?? asString(payload?.prompt);
     return [
       {
-        type: "approval.requested",
-        eventId: event.id,
-        provider: event.provider,
-        sessionId: event.sessionId,
-        createdAt: event.createdAt,
-        ...(event.threadId ? { threadId: event.threadId } : {}),
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        ...(event.itemId ? { itemId: event.itemId } : {}),
-        requestId: event.requestId,
-        requestKind: event.requestKind,
-        ...(detail ? { detail } : {}),
+        ...base,
+        requestId: RuntimeRequestId.makeUnsafe(event.requestId),
+        type: "request.opened" as const,
+        payload: {
+          requestType: toCanonicalRequestType(event.requestKind),
+          ...(detail ? { detail } : {}),
+          ...(payload ? { args: payload } : {}),
+        },
       },
     ];
   }
@@ -294,41 +285,103 @@ function mapToRuntimeEvents(event: ProviderEvent): ReadonlyArray<ProviderRuntime
     const decision = Schema.decodeUnknownSync(ProviderApprovalDecision)(payload?.decision);
     return [
       {
-        type: "approval.resolved",
-        eventId: event.id,
-        provider: event.provider,
-        sessionId: event.sessionId,
-        createdAt: event.createdAt,
-        ...(event.threadId ? { threadId: event.threadId } : {}),
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        ...(event.itemId ? { itemId: event.itemId } : {}),
-        requestId: event.requestId,
-        ...(event.requestKind ? { requestKind: event.requestKind } : {}),
-        ...(decision ? { decision } : {}),
+        ...base,
+        requestId: RuntimeRequestId.makeUnsafe(event.requestId),
+        type: "request.resolved" as const,
+        payload: {
+          requestType: event.requestKind
+            ? toCanonicalRequestType(event.requestKind)
+            : ("unknown" as const),
+          ...(decision ? { decision } : {}),
+        },
       },
     ];
   }
 
-  const messageCompleted = mapMessageCompletedEvent(event);
-  if (messageCompleted) {
-    return [messageCompleted];
+  if (event.method === "serverRequest/resolved" && event.requestId) {
+    return [
+      {
+        ...base,
+        requestId: RuntimeRequestId.makeUnsafe(event.requestId),
+        type: "request.resolved" as const,
+        payload: {
+          requestType: event.requestKind
+            ? toCanonicalRequestType(event.requestKind)
+            : ("unknown" as const),
+          ...(payload?.decision ? { decision: String(payload.decision) } : {}),
+        },
+      },
+    ];
   }
 
-  const tool = mapToolEvent(event);
-  if (tool) {
-    return [tool];
+  if (event.method === "item/completed") {
+    const item = asObject(payload?.item);
+    if (!item) return [];
+    const normalizedType = normalizeItemType(item.type ?? item.kind);
+    const canonicalType = toCanonicalItemType(normalizedType);
+
+    if (canonicalType === "assistant_message") {
+      const itemId = event.itemId ?? asString(item.id);
+      if (!itemId) return [];
+      return [
+        {
+          ...base,
+          itemId: RuntimeItemId.makeUnsafe(itemId),
+          type: "item.completed" as const,
+          payload: {
+            itemType: "assistant_message" as const,
+            status: "completed" as const,
+          },
+        },
+      ];
+    }
+
+    if (canonicalType && isToolItemType(canonicalType) && !shouldDropItemType(normalizedType)) {
+      return [
+        {
+          ...base,
+          type: "item.completed" as const,
+          payload: {
+            itemType: canonicalType,
+            status: "completed" as const,
+            title: titleForItemType(canonicalType),
+            ...(payload ? { detail: itemDetail(item, payload) } : {}),
+          },
+        },
+      ];
+    }
+  }
+
+  if (event.method === "item/started") {
+    const item = asObject(payload?.item);
+    if (!item) return [];
+    const normalizedType = normalizeItemType(item.type ?? item.kind);
+    if (shouldDropItemType(normalizedType)) return [];
+    const canonicalType = toCanonicalItemType(normalizedType);
+    if (!canonicalType || !isToolItemType(canonicalType)) return [];
+
+    return [
+      {
+        ...base,
+        type: "item.started" as const,
+        payload: {
+          itemType: canonicalType,
+          status: "inProgress" as const,
+          title: titleForItemType(canonicalType),
+          ...(payload ? { detail: itemDetail(item, payload) } : {}),
+        },
+      },
+    ];
   }
 
   if (event.method === "session/started") {
     return [
       {
-        type: "session.started",
-        eventId: event.id,
-        provider: event.provider,
-        sessionId: event.sessionId,
-        createdAt: event.createdAt,
-        ...(event.threadId ? { threadId: event.threadId } : {}),
-        ...(event.message ? { message: event.message } : {}),
+        ...base,
+        type: "session.started" as const,
+        payload: {
+          ...(event.message ? { message: event.message } : {}),
+        },
       },
     ];
   }
@@ -336,13 +389,11 @@ function mapToRuntimeEvents(event: ProviderEvent): ReadonlyArray<ProviderRuntime
   if (event.method === "session/exited" || event.method === "session/closed") {
     return [
       {
-        type: "session.exited",
-        eventId: event.id,
-        provider: event.provider,
-        sessionId: event.sessionId,
-        createdAt: event.createdAt,
-        ...(event.threadId ? { threadId: event.threadId } : {}),
-        ...(event.message ? { message: event.message } : {}),
+        ...base,
+        type: "session.exited" as const,
+        payload: {
+          ...(event.message ? { reason: event.message } : {}),
+        },
       },
     ];
   }
@@ -357,12 +408,12 @@ function mapToRuntimeEvents(event: ProviderEvent): ReadonlyArray<ProviderRuntime
     }
     return [
       {
-        type: "thread.started",
-        eventId: event.id,
-        provider: event.provider,
-        sessionId: event.sessionId,
-        createdAt: event.createdAt,
-        threadId,
+        ...base,
+        threadId: ThreadId.makeUnsafe(threadId),
+        type: "thread.started" as const,
+        payload: {
+          providerThreadId: ProviderThreadId.makeUnsafe(threadId),
+        },
       },
     ];
   }
@@ -376,47 +427,169 @@ function mapToRuntimeEvents(event: ProviderEvent): ReadonlyArray<ProviderRuntime
     }
     return [
       {
-        type: "turn.started",
-        eventId: event.id,
-        provider: event.provider,
-        sessionId: event.sessionId,
-        createdAt: event.createdAt,
-        ...(event.threadId ? { threadId: event.threadId } : {}),
-        turnId,
+        ...base,
+        turnId: TurnId.makeUnsafe(turnId),
+        type: "turn.started" as const,
+        payload: {
+          ...(asString(turn?.model) ? { model: asString(turn?.model) } : {}),
+        },
       },
     ];
   }
 
   if (event.method === "turn/completed") {
+    const state = toTurnState(turn?.status) ?? ("completed" as const);
     return [
       {
-        type: "turn.completed",
-        eventId: event.id,
-        provider: event.provider,
-        sessionId: event.sessionId,
-        createdAt: event.createdAt,
-        ...(event.threadId ? { threadId: event.threadId } : {}),
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        ...(toTurnStatus(turn?.status) ? { status: toTurnStatus(turn?.status) } : {}),
-        ...(asString(asObject(turn?.error)?.message)
-          ? { errorMessage: asString(asObject(turn?.error)?.message) }
-          : {}),
+        ...base,
+        type: "turn.completed" as const,
+        payload: {
+          state,
+          ...(asString(asObject(turn?.error)?.message)
+            ? { errorMessage: asString(asObject(turn?.error)?.message) }
+            : {}),
+          ...(turn?.usage !== undefined ? { usage: turn.usage } : {}),
+          ...(turn?.costUsd !== undefined ? { totalCostUsd: asNumber(turn.costUsd) } : {}),
+        },
       },
     ];
   }
 
-  if (event.method === "item/agentMessage/delta" && event.textDelta && event.textDelta.length > 0) {
+  if (event.method === "turn/plan/updated" && payload) {
+    const explanation = asString(payload.explanation);
+    const rawPlan = payload.plan;
+    if (Array.isArray(rawPlan)) {
+      const plan = rawPlan.map((step: unknown) => {
+        const s = asObject(step);
+        return {
+          step: asString(s?.step) ?? "",
+          status: (asString(s?.status) ?? "pending") as "pending" | "inProgress" | "completed",
+        };
+      });
+      return [
+        {
+          ...base,
+          type: "turn.plan.updated" as const,
+          payload: {
+            ...(explanation !== undefined ? { explanation } : {}),
+            plan,
+          },
+        },
+      ];
+    }
+  }
+
+  if (
+    event.method === "item/agentMessage/delta" &&
+    event.textDelta &&
+    event.textDelta.length > 0
+  ) {
     return [
       {
-        type: "message.delta",
-        eventId: event.id,
-        provider: event.provider,
-        sessionId: event.sessionId,
-        createdAt: event.createdAt,
-        ...(event.threadId ? { threadId: event.threadId } : {}),
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        ...(event.itemId ? { itemId: event.itemId } : {}),
-        delta: event.textDelta,
+        ...base,
+        type: "content.delta" as const,
+        payload: {
+          streamKind: "assistant_text" as const,
+          delta: event.textDelta,
+        },
+      },
+    ];
+  }
+
+  if (event.method === "item/reasoning/textDelta" && event.textDelta) {
+    return [
+      {
+        ...base,
+        type: "content.delta" as const,
+        payload: {
+          streamKind: "reasoning_text" as const,
+          delta: event.textDelta,
+          ...(asNumber(payload?.contentIndex) !== undefined
+            ? { contentIndex: asNumber(payload?.contentIndex) }
+            : {}),
+        },
+      },
+    ];
+  }
+
+  if (event.method === "item/reasoning/summaryTextDelta" && event.textDelta) {
+    return [
+      {
+        ...base,
+        type: "content.delta" as const,
+        payload: {
+          streamKind: "reasoning_summary_text" as const,
+          delta: event.textDelta,
+          ...(asNumber(payload?.summaryIndex) !== undefined
+            ? { summaryIndex: asNumber(payload?.summaryIndex) }
+            : {}),
+        },
+      },
+    ];
+  }
+
+  if (event.method === "item/plan/delta" && event.textDelta) {
+    return [
+      {
+        ...base,
+        type: "content.delta" as const,
+        payload: {
+          streamKind: "plan_text" as const,
+          delta: event.textDelta,
+        },
+      },
+    ];
+  }
+
+  if (event.method === "item/commandExecution/outputDelta" && event.textDelta) {
+    return [
+      {
+        ...base,
+        type: "content.delta" as const,
+        payload: {
+          streamKind: "command_output" as const,
+          delta: event.textDelta,
+        },
+      },
+    ];
+  }
+
+  if (event.method === "item/fileChange/outputDelta" && event.textDelta) {
+    return [
+      {
+        ...base,
+        type: "content.delta" as const,
+        payload: {
+          streamKind: "file_change_output" as const,
+          delta: event.textDelta,
+        },
+      },
+    ];
+  }
+
+  if (event.method === "item/mcpToolCall/progress") {
+    return [
+      {
+        ...base,
+        type: "runtime.warning" as const,
+        payload: {
+          message: "MCP tool call progress",
+          detail: payload,
+        },
+      },
+    ];
+  }
+
+  if (event.method === "error" && event.message) {
+    return [
+      {
+        ...base,
+        type: "runtime.error" as const,
+        payload: {
+          message: event.message,
+          class: "provider_error" as const,
+          ...(payload ? { detail: payload } : {}),
+        },
       },
     ];
   }
