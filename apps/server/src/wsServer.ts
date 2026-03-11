@@ -7,7 +7,6 @@
  * @module Server
  */
 import http from "node:http";
-import type { Duplex } from "node:stream";
 
 import Mime from "@effect/platform-node/Mime";
 import {
@@ -28,12 +27,14 @@ import {
   type WsPushEnvelopeBase,
 } from "@t3tools/contracts";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import * as Socket from "effect/unstable/socket/Socket";
 import {
   Cause,
   Effect,
   Exit,
   FileSystem,
   Layer,
+  Option,
   Path,
   Ref,
   Result,
@@ -43,7 +44,7 @@ import {
   Stream,
   Struct,
 } from "effect";
-import { WebSocketServer, type WebSocket } from "ws";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { createLogger } from "./logger";
 import { GitManager } from "./git/Services/GitManager.ts";
@@ -60,7 +61,7 @@ import { clamp } from "effect/Number";
 import { Open, resolveAvailableEditors } from "./open";
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore.ts";
-import { tryHandleProjectFaviconRequest } from "./projectFaviconRoute";
+import { handleProjectFaviconRequest } from "./projectFaviconRoute";
 import {
   ATTACHMENTS_ROUTE_PREFIX,
   normalizeAttachmentRelativePath,
@@ -75,7 +76,7 @@ import {
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { expandHomePath } from "./os-jank.ts";
-import { makeServerPushBus } from "./wsServer/pushBus.ts";
+import { makeServerPushBus, type ServerPushClient } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
 
@@ -103,54 +104,11 @@ export interface ServerShape {
  */
 export class Server extends ServiceMap.Service<Server, ServerShape>()("t3/wsServer/Server") {}
 
-const isServerNotRunningError = (error: Error): boolean => {
-  const maybeCode = (error as NodeJS.ErrnoException).code;
-  return (
-    maybeCode === "ERR_SERVER_NOT_RUNNING" || error.message.toLowerCase().includes("not running")
-  );
-};
-
-function rejectUpgrade(socket: Duplex, statusCode: number, message: string): void {
-  socket.end(
-    `HTTP/1.1 ${statusCode} ${statusCode === 401 ? "Unauthorized" : "Bad Request"}\r\n` +
-      "Connection: close\r\n" +
-      "Content-Type: text/plain\r\n" +
-      `Content-Length: ${Buffer.byteLength(message)}\r\n` +
-      "\r\n" +
-      message,
-  );
-}
-
-function websocketRawToString(raw: unknown): string | null {
+function websocketRawToString(raw: string | Uint8Array): string {
   if (typeof raw === "string") {
     return raw;
   }
-  if (raw instanceof Uint8Array) {
-    return Buffer.from(raw).toString("utf8");
-  }
-  if (raw instanceof ArrayBuffer) {
-    return Buffer.from(new Uint8Array(raw)).toString("utf8");
-  }
-  if (Array.isArray(raw)) {
-    const chunks: string[] = [];
-    for (const chunk of raw) {
-      if (typeof chunk === "string") {
-        chunks.push(chunk);
-        continue;
-      }
-      if (chunk instanceof Uint8Array) {
-        chunks.push(Buffer.from(chunk).toString("utf8"));
-        continue;
-      }
-      if (chunk instanceof ArrayBuffer) {
-        chunks.push(Buffer.from(new Uint8Array(chunk)).toString("utf8"));
-        continue;
-      }
-      return null;
-    }
-    return chunks.join("");
-  }
-  return null;
+  return Buffer.from(raw).toString("utf8");
 }
 
 function toPosixRelativePath(input: string): string {
@@ -270,7 +228,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   const providerStatuses = yield* providerHealth.getStatuses;
 
-  const clients = yield* Ref.make(new Set<WebSocket>());
+  const clients = yield* Ref.make(new Set<ServerPushClient>());
   const logger = createLogger("ws");
   const readiness = yield* makeServerReadiness;
 
@@ -410,191 +368,130 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     } satisfies OrchestrationCommand;
   });
 
-  // HTTP server — serves static files or redirects to Vite dev server
-  const httpServer = http.createServer((req, res) => {
-    const respond = (
-      statusCode: number,
-      headers: Record<string, string>,
-      body?: string | Uint8Array,
-    ) => {
-      res.writeHead(statusCode, headers);
-      res.end(body);
-    };
+  const serveHttpRequest = Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (!url) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
 
-    void Effect.runPromise(
-      Effect.gen(function* () {
-        const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-        if (tryHandleProjectFaviconRequest(url, res)) {
-          return;
-        }
+    if (url.pathname === "/api/project-favicon") {
+      return yield* handleProjectFaviconRequest(url.searchParams.get("cwd"));
+    }
 
-        if (url.pathname.startsWith(ATTACHMENTS_ROUTE_PREFIX)) {
-          const rawRelativePath = url.pathname.slice(ATTACHMENTS_ROUTE_PREFIX.length);
-          const normalizedRelativePath = normalizeAttachmentRelativePath(rawRelativePath);
-          if (!normalizedRelativePath) {
-            respond(400, { "Content-Type": "text/plain" }, "Invalid attachment path");
-            return;
-          }
+    if (url.pathname.startsWith(ATTACHMENTS_ROUTE_PREFIX)) {
+      const rawRelativePath = url.pathname.slice(ATTACHMENTS_ROUTE_PREFIX.length);
+      const normalizedRelativePath = normalizeAttachmentRelativePath(rawRelativePath);
+      if (!normalizedRelativePath) {
+        return HttpServerResponse.text("Invalid attachment path", { status: 400 });
+      }
 
-          const isIdLookup =
-            !normalizedRelativePath.includes("/") && !normalizedRelativePath.includes(".");
-          const filePath = isIdLookup
-            ? resolveAttachmentPathById({
-                stateDir: serverConfig.stateDir,
-                attachmentId: normalizedRelativePath,
-              })
-            : resolveAttachmentRelativePath({
-                stateDir: serverConfig.stateDir,
-                relativePath: normalizedRelativePath,
-              });
-          if (!filePath) {
-            respond(
-              isIdLookup ? 404 : 400,
-              { "Content-Type": "text/plain" },
-              isIdLookup ? "Not Found" : "Invalid attachment path",
-            );
-            return;
-          }
-
-          const fileInfo = yield* fileSystem
-            .stat(filePath)
-            .pipe(Effect.catch(() => Effect.succeed(null)));
-          if (!fileInfo || fileInfo.type !== "File") {
-            respond(404, { "Content-Type": "text/plain" }, "Not Found");
-            return;
-          }
-
-          const contentType = Mime.getType(filePath) ?? "application/octet-stream";
-          res.writeHead(200, {
-            "Content-Type": contentType,
-            "Cache-Control": "public, max-age=31536000, immutable",
+      const isIdLookup =
+        !normalizedRelativePath.includes("/") && !normalizedRelativePath.includes(".");
+      const filePath = isIdLookup
+        ? resolveAttachmentPathById({
+            stateDir: serverConfig.stateDir,
+            attachmentId: normalizedRelativePath,
+          })
+        : resolveAttachmentRelativePath({
+            stateDir: serverConfig.stateDir,
+            relativePath: normalizedRelativePath,
           });
-          const streamExit = yield* Stream.runForEach(fileSystem.stream(filePath), (chunk) =>
-            Effect.sync(() => {
-              if (!res.destroyed) {
-                res.write(chunk);
-              }
-            }),
-          ).pipe(Effect.exit);
-          if (Exit.isFailure(streamExit)) {
-            if (!res.destroyed) {
-              res.destroy();
-            }
-            return;
-          }
-          if (!res.writableEnded) {
-            res.end();
-          }
-          return;
-        }
-
-        // In dev mode, redirect to Vite dev server
-        if (devUrl) {
-          respond(302, { Location: devUrl.href });
-          return;
-        }
-
-        // Serve static files from the web app build
-        if (!staticDir) {
-          respond(
-            503,
-            { "Content-Type": "text/plain" },
-            "No static directory configured and no dev URL set.",
-          );
-          return;
-        }
-
-        const staticRoot = path.resolve(staticDir);
-        const staticRequestPath = url.pathname === "/" ? "/index.html" : url.pathname;
-        const rawStaticRelativePath = staticRequestPath.replace(/^[/\\]+/, "");
-        const hasRawLeadingParentSegment = rawStaticRelativePath.startsWith("..");
-        const staticRelativePath = path.normalize(rawStaticRelativePath).replace(/^[/\\]+/, "");
-        const hasPathTraversalSegment = staticRelativePath.startsWith("..");
-        if (
-          staticRelativePath.length === 0 ||
-          hasRawLeadingParentSegment ||
-          hasPathTraversalSegment ||
-          staticRelativePath.includes("\0")
-        ) {
-          respond(400, { "Content-Type": "text/plain" }, "Invalid static file path");
-          return;
-        }
-
-        const isWithinStaticRoot = (candidate: string) =>
-          candidate === staticRoot ||
-          candidate.startsWith(
-            staticRoot.endsWith(path.sep) ? staticRoot : `${staticRoot}${path.sep}`,
-          );
-
-        let filePath = path.resolve(staticRoot, staticRelativePath);
-        if (!isWithinStaticRoot(filePath)) {
-          respond(400, { "Content-Type": "text/plain" }, "Invalid static file path");
-          return;
-        }
-
-        const ext = path.extname(filePath);
-        if (!ext) {
-          filePath = path.resolve(filePath, "index.html");
-          if (!isWithinStaticRoot(filePath)) {
-            respond(400, { "Content-Type": "text/plain" }, "Invalid static file path");
-            return;
-          }
-        }
-
-        const fileInfo = yield* fileSystem
-          .stat(filePath)
-          .pipe(Effect.catch(() => Effect.succeed(null)));
-        if (!fileInfo || fileInfo.type !== "File") {
-          const indexPath = path.resolve(staticRoot, "index.html");
-          const indexData = yield* fileSystem
-            .readFile(indexPath)
-            .pipe(Effect.catch(() => Effect.succeed(null)));
-          if (!indexData) {
-            respond(404, { "Content-Type": "text/plain" }, "Not Found");
-            return;
-          }
-          respond(200, { "Content-Type": "text/html; charset=utf-8" }, indexData);
-          return;
-        }
-
-        const contentType = Mime.getType(filePath) ?? "application/octet-stream";
-        const data = yield* fileSystem
-          .readFile(filePath)
-          .pipe(Effect.catch(() => Effect.succeed(null)));
-        if (!data) {
-          respond(500, { "Content-Type": "text/plain" }, "Internal Server Error");
-          return;
-        }
-        respond(200, { "Content-Type": contentType }, data);
-      }),
-    ).catch(() => {
-      if (!res.headersSent) {
-        respond(500, { "Content-Type": "text/plain" }, "Internal Server Error");
+      if (!filePath) {
+        return HttpServerResponse.text(isIdLookup ? "Not Found" : "Invalid attachment path", {
+          status: isIdLookup ? 404 : 400,
+        });
       }
-    });
+
+      const fileInfo = yield* fileSystem
+        .stat(filePath)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!fileInfo || fileInfo.type !== "File") {
+        return HttpServerResponse.text("Not Found", { status: 404 });
+      }
+
+      const contentType = Mime.getType(filePath) ?? "application/octet-stream";
+      const data = yield* fileSystem
+        .readFile(filePath)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!data) {
+        return HttpServerResponse.text("Internal Server Error", { status: 500 });
+      }
+      return HttpServerResponse.uint8Array(data, {
+        contentType,
+        headers: { "Cache-Control": "public, max-age=31536000, immutable" },
+      });
+    }
+
+    if (devUrl) {
+      return HttpServerResponse.redirect(devUrl.href, { status: 302 });
+    }
+
+    if (!staticDir) {
+      return HttpServerResponse.text("No static directory configured and no dev URL set.", {
+        status: 503,
+      });
+    }
+
+    const staticRoot = path.resolve(staticDir);
+    const staticRequestPath = url.pathname === "/" ? "/index.html" : url.pathname;
+    const rawStaticRelativePath = staticRequestPath.replace(/^[/\\]+/, "");
+    const hasRawLeadingParentSegment = rawStaticRelativePath.startsWith("..");
+    const staticRelativePath = path.normalize(rawStaticRelativePath).replace(/^[/\\]+/, "");
+    const hasPathTraversalSegment = staticRelativePath.startsWith("..");
+    if (
+      staticRelativePath.length === 0 ||
+      hasRawLeadingParentSegment ||
+      hasPathTraversalSegment ||
+      staticRelativePath.includes("\0")
+    ) {
+      return HttpServerResponse.text("Invalid static file path", { status: 400 });
+    }
+
+    const isWithinStaticRoot = (candidate: string) =>
+      candidate === staticRoot ||
+      candidate.startsWith(staticRoot.endsWith(path.sep) ? staticRoot : `${staticRoot}${path.sep}`);
+
+    let filePath = path.resolve(staticRoot, staticRelativePath);
+    if (!isWithinStaticRoot(filePath)) {
+      return HttpServerResponse.text("Invalid static file path", { status: 400 });
+    }
+
+    const ext = path.extname(filePath);
+    if (!ext) {
+      filePath = path.resolve(filePath, "index.html");
+      if (!isWithinStaticRoot(filePath)) {
+        return HttpServerResponse.text("Invalid static file path", { status: 400 });
+      }
+    }
+
+    const fileInfo = yield* fileSystem
+      .stat(filePath)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!fileInfo || fileInfo.type !== "File") {
+      const indexPath = path.resolve(staticRoot, "index.html");
+      const indexData = yield* fileSystem
+        .readFile(indexPath)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!indexData) {
+        return HttpServerResponse.text("Not Found", { status: 404 });
+      }
+      return HttpServerResponse.uint8Array(indexData, {
+        contentType: "text/html; charset=utf-8",
+      });
+    }
+
+    const contentType = Mime.getType(filePath) ?? "application/octet-stream";
+    const data = yield* fileSystem
+      .readFile(filePath)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!data) {
+      return HttpServerResponse.text("Internal Server Error", { status: 500 });
+    }
+    return HttpServerResponse.uint8Array(data, { contentType });
   });
 
-  // WebSocket server — upgrades from the HTTP server
-  const wss = new WebSocketServer({ noServer: true });
-
-  const closeWebSocketServer = Effect.callback<void, ServerLifecycleError>((resume) => {
-    wss.close((error) => {
-      if (error && !isServerNotRunningError(error)) {
-        resume(
-          Effect.fail(
-            new ServerLifecycleError({ operation: "closeWebSocketServer", cause: error }),
-          ),
-        );
-      } else {
-        resume(Effect.void);
-      }
-    });
-  });
-
-  const closeAllClients = Ref.get(clients).pipe(
-    Effect.flatMap(Effect.forEach((client) => Effect.sync(() => client.close()))),
-    Effect.flatMap(() => Ref.set(clients, new Set())),
-  );
+  const httpServer = http.createServer();
 
   const listenOptions = host ? { host, port } : { port };
 
@@ -690,19 +587,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const runPromise = Effect.runPromiseWith(runtimeServices);
 
   const unsubscribeTerminalEvents = yield* terminalManager.subscribe(
-    (event) => void Effect.runPromise(pushBus.publishAll(WS_CHANNELS.terminalEvent, event)),
+    (event) => void runPromise(pushBus.publishAll(WS_CHANNELS.terminalEvent, event)),
   );
   yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeTerminalEvents()));
   yield* readiness.markTerminalSubscriptionsReady;
-
-  yield* NodeHttpServer.make(() => httpServer, listenOptions).pipe(
-    Effect.mapError((cause) => new ServerLifecycleError({ operation: "httpServerListen", cause })),
-  );
-  yield* readiness.markHttpListening;
-
-  yield* Effect.addFinalizer(() =>
-    Effect.all([closeAllClients, closeWebSocketServer.pipe(Effect.ignoreCause({ log: true }))]),
-  );
 
   const routeRequest = Effect.fnUntraced(function* (request: WebSocketRequest) {
     switch (request.body._tag) {
@@ -892,21 +780,17 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     }
   });
 
-  const handleMessage = Effect.fnUntraced(function* (ws: WebSocket, raw: unknown) {
+  const handleMessage = Effect.fnUntraced(function* (
+    client: ServerPushClient,
+    raw: string | Uint8Array,
+  ) {
     const sendWsResponse = (response: WsResponseMessage) =>
       encodeWsResponse(response).pipe(
-        Effect.tap((encodedResponse) => Effect.sync(() => ws.send(encodedResponse))),
+        Effect.flatMap((encodedResponse) => client.send(encodedResponse)),
         Effect.asVoid,
       );
 
     const messageText = websocketRawToString(raw);
-    if (messageText === null) {
-      return yield* sendWsResponse({
-        id: "unknown",
-        error: { message: "Invalid request format: Failed to read message" },
-      });
-    }
-
     const request = decodeWebSocketRequest(messageText);
     if (Result.isFailure(request)) {
       return yield* sendWsResponse({
@@ -929,31 +813,22 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     });
   });
 
-  httpServer.on("upgrade", (request, socket, head) => {
-    socket.on("error", () => {}); // Prevent unhandled `EPIPE`/`ECONNRESET` from crashing the process if the client disconnects mid-handshake
+  const handleWebSocketConnection = Effect.fnUntraced(function* (socket: Socket.Socket) {
+    const writer = yield* socket.writer;
+    const client: ServerPushClient = {
+      send: (message) =>
+        writer(message).pipe(
+          Effect.as(true),
+          Effect.catch(() => Effect.succeed(false)),
+        ),
+    };
+    yield* Effect.addFinalizer(() =>
+      Ref.update(clients, (currentClients) => {
+        currentClients.delete(client);
+        return currentClients;
+      }),
+    );
 
-    if (authToken) {
-      let providedToken: string | null = null;
-      try {
-        const url = new URL(request.url ?? "/", `http://localhost:${port}`);
-        providedToken = url.searchParams.get("token");
-      } catch {
-        rejectUpgrade(socket, 400, "Invalid WebSocket URL");
-        return;
-      }
-
-      if (providedToken !== authToken) {
-        rejectUpgrade(socket, 401, "Unauthorized WebSocket connection");
-        return;
-      }
-    }
-
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit("connection", ws, request);
-    });
-  });
-
-  wss.on("connection", (ws) => {
     const segments = cwd.split(/[/\\]/).filter(Boolean);
     const projectName = segments[segments.length - 1] ?? "project";
 
@@ -963,39 +838,63 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       ...(welcomeBootstrapProjectId ? { bootstrapProjectId: welcomeBootstrapProjectId } : {}),
       ...(welcomeBootstrapThreadId ? { bootstrapThreadId: welcomeBootstrapThreadId } : {}),
     };
-    // Send welcome before adding to broadcast set so publishAll calls
-    // cannot reach this client before the welcome arrives.
-    void runPromise(
-      readiness.awaitServerReady.pipe(
-        Effect.flatMap(() => pushBus.publishClient(ws, WS_CHANNELS.serverWelcome, welcomeData)),
-        Effect.flatMap((delivered) =>
-          delivered ? Ref.update(clients, (clients) => clients.add(ws)) : Effect.void,
+
+    yield* socket
+      .runRaw((raw) => handleMessage(client, raw).pipe(Effect.ignoreCause({ log: true })), {
+        onOpen: readiness.awaitServerReady.pipe(
+          Effect.flatMap(() =>
+            pushBus.publishClient(client, WS_CHANNELS.serverWelcome, welcomeData),
+          ),
+          Effect.flatMap((delivered) =>
+            delivered
+              ? Ref.update(clients, (currentClients) => currentClients.add(client))
+              : Effect.void,
+          ),
         ),
+      })
+      .pipe(Effect.catchReason("SocketError", "SocketCloseError", () => Effect.void));
+  });
+
+  const websocketRoute = Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (!url) {
+      return HttpServerResponse.text("Invalid WebSocket URL", { status: 400 });
+    }
+
+    if (authToken && url.searchParams.get("token") !== authToken) {
+      return HttpServerResponse.text("Unauthorized WebSocket connection", { status: 401 });
+    }
+
+    const socket = yield* request.upgrade.pipe(Effect.option);
+    if (Option.isNone(socket)) {
+      return HttpServerResponse.text("WebSocket upgrade required", { status: 400 });
+    }
+    yield* handleWebSocketConnection(socket.value);
+    return HttpServerResponse.empty();
+  });
+
+  const router = yield* HttpRouter.make;
+  yield* Effect.orDie(router.add("GET", "/ws", websocketRoute) as Effect.Effect<void>);
+  yield* Effect.orDie(router.add("GET", "*", serveHttpRequest) as Effect.Effect<void>);
+  const httpApp: Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    never,
+    HttpServerRequest.HttpServerRequest | Scope.Scope
+  > = router
+    .asHttpEffect()
+    .pipe(
+      Effect.catchCause(() =>
+        Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
       ),
     );
 
-    ws.on("message", (raw) => {
-      void runPromise(handleMessage(ws, raw).pipe(Effect.ignoreCause({ log: true })));
-    });
-
-    ws.on("close", () => {
-      void runPromise(
-        Ref.update(clients, (clients) => {
-          clients.delete(ws);
-          return clients;
-        }),
-      );
-    });
-
-    ws.on("error", () => {
-      void runPromise(
-        Ref.update(clients, (clients) => {
-          clients.delete(ws);
-          return clients;
-        }),
-      );
-    });
-  });
+  const nodeHttpServer = yield* NodeHttpServer.make(() => httpServer, listenOptions).pipe(
+    Effect.mapError((cause) => new ServerLifecycleError({ operation: "httpServerListen", cause })),
+  );
+  yield* nodeHttpServer.serve(httpApp);
+  yield* readiness.markHttpListening;
+  yield* Effect.addFinalizer(() => Ref.set(clients, new Set()));
 
   return httpServer;
 });

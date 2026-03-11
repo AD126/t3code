@@ -53,14 +53,10 @@ describe("makeServerPushBus", () => {
           providers: [],
         });
 
-        const delivered = yield* pushBus.publishClient(
-          client,
-          WS_CHANNELS.serverWelcome,
-          {
-            cwd: "/tmp/project",
-            projectName: "project",
-          },
-        );
+        const delivered = yield* pushBus.publishClient(client, WS_CHANNELS.serverWelcome, {
+          cwd: "/tmp/project",
+          projectName: "project",
+        });
         expect(delivered).toBe(true);
 
         yield* Ref.update(clients, (current) => current.add(client));
