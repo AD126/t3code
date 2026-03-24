@@ -3,6 +3,7 @@ import {
   MessageId,
   ThreadId,
   TurnId,
+  type OrchestrationThreadActivityKind,
   type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
@@ -25,7 +26,7 @@ import {
 function makeActivity(overrides: {
   id?: string;
   createdAt?: string;
-  kind?: string;
+  kind?: OrchestrationThreadActivityKind;
   summary?: string;
   tone?: OrchestrationThreadActivity["tone"];
   payload?: Record<string, unknown>;
@@ -42,7 +43,7 @@ function makeActivity(overrides: {
     payload,
     turnId: overrides.turnId ? TurnId.makeUnsafe(overrides.turnId) : null,
     ...(overrides.sequence !== undefined ? { sequence: overrides.sequence } : {}),
-  };
+  } as OrchestrationThreadActivity;
 }
 
 describe("derivePendingApprovals", () => {
@@ -1024,7 +1025,7 @@ describe("hasToolActivityForTurn", () => {
   it("returns true only for matching tool activity in the target turn", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({ id: "tool-1", turnId: "turn-1", kind: "tool.completed", tone: "tool" }),
-      makeActivity({ id: "info-1", turnId: "turn-2", kind: "turn.completed", tone: "info" }),
+      makeActivity({ id: "info-1", turnId: "turn-2", kind: "task.completed", tone: "info" }),
     ];
 
     expect(hasToolActivityForTurn(activities, TurnId.makeUnsafe("turn-1"))).toBe(true);

@@ -805,18 +805,6 @@ function mapToRuntimeEvents(
     ];
   }
 
-  if (event.method === "turn/aborted") {
-    return [
-      {
-        ...runtimeEventBase(event, canonicalThreadId),
-        type: "turn.aborted",
-        payload: {
-          reason: event.message ?? "Turn aborted",
-        },
-      },
-    ];
-  }
-
   if (event.method === "turn/plan/updated") {
     const steps = Array.isArray(payload?.plan) ? payload.plan : [];
     return [
@@ -945,23 +933,6 @@ function mapToRuntimeEvents(
             : {}),
           ...(typeof payload?.summaryIndex === "number"
             ? { summaryIndex: payload.summaryIndex }
-            : {}),
-        },
-      },
-    ];
-  }
-
-  if (event.method === "item/mcpToolCall/progress") {
-    return [
-      {
-        ...runtimeEventBase(event, canonicalThreadId),
-        type: "tool.progress",
-        payload: {
-          ...(asString(payload?.toolUseId) ? { toolUseId: asString(payload?.toolUseId) } : {}),
-          ...(asString(payload?.toolName) ? { toolName: asString(payload?.toolName) } : {}),
-          ...(asString(payload?.summary) ? { summary: asString(payload?.summary) } : {}),
-          ...(asNumber(payload?.elapsedSeconds) !== undefined
-            ? { elapsedSeconds: asNumber(payload?.elapsedSeconds) }
             : {}),
         },
       },
@@ -1102,148 +1073,6 @@ function mapToRuntimeEvents(
           ...(asNumber(msg?.summary_index) !== undefined
             ? { summaryIndex: asNumber(msg?.summary_index) }
             : {}),
-        },
-      },
-    ];
-  }
-
-  if (event.method === "model/rerouted") {
-    return [
-      {
-        type: "model.rerouted",
-        ...runtimeEventBase(event, canonicalThreadId),
-        payload: {
-          fromModel: asString(payload?.fromModel) ?? "unknown",
-          toModel: asString(payload?.toModel) ?? "unknown",
-          reason: asString(payload?.reason) ?? "unknown",
-        },
-      },
-    ];
-  }
-
-  if (event.method === "deprecationNotice") {
-    return [
-      {
-        type: "deprecation.notice",
-        ...runtimeEventBase(event, canonicalThreadId),
-        payload: {
-          summary: asString(payload?.summary) ?? "Deprecation notice",
-          ...(asString(payload?.details) ? { details: asString(payload?.details) } : {}),
-        },
-      },
-    ];
-  }
-
-  if (event.method === "configWarning") {
-    return [
-      {
-        type: "config.warning",
-        ...runtimeEventBase(event, canonicalThreadId),
-        payload: {
-          summary: asString(payload?.summary) ?? "Configuration warning",
-          ...(asString(payload?.details) ? { details: asString(payload?.details) } : {}),
-          ...(asString(payload?.path) ? { path: asString(payload?.path) } : {}),
-          ...(payload?.range !== undefined ? { range: payload.range } : {}),
-        },
-      },
-    ];
-  }
-
-  if (event.method === "account/updated") {
-    return [
-      {
-        type: "account.updated",
-        ...runtimeEventBase(event, canonicalThreadId),
-        payload: {
-          account: event.payload ?? {},
-        },
-      },
-    ];
-  }
-
-  if (event.method === "account/rateLimits/updated") {
-    return [
-      {
-        type: "account.rate-limits.updated",
-        ...runtimeEventBase(event, canonicalThreadId),
-        payload: {
-          rateLimits: event.payload ?? {},
-        },
-      },
-    ];
-  }
-
-  if (event.method === "mcpServer/oauthLogin/completed") {
-    return [
-      {
-        type: "mcp.oauth.completed",
-        ...runtimeEventBase(event, canonicalThreadId),
-        payload: {
-          success: payload?.success === true,
-          ...(asString(payload?.name) ? { name: asString(payload?.name) } : {}),
-          ...(asString(payload?.error) ? { error: asString(payload?.error) } : {}),
-        },
-      },
-    ];
-  }
-
-  if (event.method === "thread/realtime/started") {
-    const realtimeSessionId = asString(payload?.realtimeSessionId);
-    return [
-      {
-        type: "thread.realtime.started",
-        ...runtimeEventBase(event, canonicalThreadId),
-        payload: {
-          realtimeSessionId,
-        },
-      },
-    ];
-  }
-
-  if (event.method === "thread/realtime/itemAdded") {
-    return [
-      {
-        type: "thread.realtime.item-added",
-        ...runtimeEventBase(event, canonicalThreadId),
-        payload: {
-          item: event.payload ?? {},
-        },
-      },
-    ];
-  }
-
-  if (event.method === "thread/realtime/outputAudio/delta") {
-    return [
-      {
-        type: "thread.realtime.audio.delta",
-        ...runtimeEventBase(event, canonicalThreadId),
-        payload: {
-          audio: event.payload ?? {},
-        },
-      },
-    ];
-  }
-
-  if (event.method === "thread/realtime/error") {
-    const message = asString(payload?.message) ?? event.message ?? "Realtime error";
-    return [
-      {
-        type: "thread.realtime.error",
-        ...runtimeEventBase(event, canonicalThreadId),
-        payload: {
-          message,
-        },
-      },
-    ];
-  }
-
-  if (event.method === "thread/realtime/closed") {
-    return [
-      {
-        type: "thread.realtime.closed",
-        ...runtimeEventBase(event, canonicalThreadId),
-        payload: {
-          reason: event.message,
         },
       },
     ];

@@ -1966,15 +1966,6 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         };
 
         switch (message.subtype) {
-          case "init":
-            yield* offerRuntimeEvent({
-              ...base,
-              type: "session.configured",
-              payload: {
-                config: message as Record<string, unknown>,
-              },
-            });
-            return;
           case "status":
             yield* offerRuntimeEvent({
               ...base,
@@ -1993,43 +1984,6 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               payload: {
                 state: "compacted",
                 detail: message,
-              },
-            });
-            return;
-          case "hook_started":
-            yield* offerRuntimeEvent({
-              ...base,
-              type: "hook.started",
-              payload: {
-                hookId: message.hook_id,
-                hookName: message.hook_name,
-                hookEvent: message.hook_event,
-              },
-            });
-            return;
-          case "hook_progress":
-            yield* offerRuntimeEvent({
-              ...base,
-              type: "hook.progress",
-              payload: {
-                hookId: message.hook_id,
-                output: message.output,
-                stdout: message.stdout,
-                stderr: message.stderr,
-              },
-            });
-            return;
-          case "hook_response":
-            yield* offerRuntimeEvent({
-              ...base,
-              type: "hook.completed",
-              payload: {
-                hookId: message.hook_id,
-                outcome: message.outcome,
-                output: message.output,
-                stdout: message.stdout,
-                stderr: message.stderr,
-                ...(typeof message.exit_code === "number" ? { exitCode: message.exit_code } : {}),
               },
             });
             return;
@@ -2105,28 +2059,6 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               },
             });
             return;
-          case "files_persisted":
-            yield* offerRuntimeEvent({
-              ...base,
-              type: "files.persisted",
-              payload: {
-                files: Array.isArray(message.files)
-                  ? message.files.map((file: { filename: string; file_id: string }) => ({
-                      filename: file.filename,
-                      fileId: file.file_id,
-                    }))
-                  : [],
-                ...(Array.isArray(message.failed)
-                  ? {
-                      failed: message.failed.map((entry: { filename: string; error: string }) => ({
-                        filename: entry.filename,
-                        error: entry.error,
-                      })),
-                    }
-                  : {}),
-              },
-            });
-            return;
           default:
             yield* emitRuntimeWarning(
               context,
@@ -2138,78 +2070,9 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       });
 
     const handleSdkTelemetryMessage = (
-      context: ClaudeSessionContext,
-      message: SDKMessage,
-    ): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        const stamp = yield* makeEventStamp();
-        const base = {
-          eventId: stamp.eventId,
-          provider: PROVIDER,
-          createdAt: stamp.createdAt,
-          threadId: context.session.threadId,
-          ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
-          providerRefs: nativeProviderRefs(context),
-          raw: {
-            source: "claude.sdk.message" as const,
-            method: sdkNativeMethod(message),
-            messageType: message.type,
-            payload: message,
-          },
-        };
-
-        if (message.type === "tool_progress") {
-          yield* offerRuntimeEvent({
-            ...base,
-            type: "tool.progress",
-            payload: {
-              toolUseId: message.tool_use_id,
-              toolName: message.tool_name,
-              elapsedSeconds: message.elapsed_time_seconds,
-              ...(message.task_id ? { summary: `task:${message.task_id}` } : {}),
-            },
-          });
-          return;
-        }
-
-        if (message.type === "tool_use_summary") {
-          yield* offerRuntimeEvent({
-            ...base,
-            type: "tool.summary",
-            payload: {
-              summary: message.summary,
-              ...(message.preceding_tool_use_ids.length > 0
-                ? { precedingToolUseIds: message.preceding_tool_use_ids }
-                : {}),
-            },
-          });
-          return;
-        }
-
-        if (message.type === "auth_status") {
-          yield* offerRuntimeEvent({
-            ...base,
-            type: "auth.status",
-            payload: {
-              isAuthenticating: message.isAuthenticating,
-              output: message.output,
-              ...(message.error ? { error: message.error } : {}),
-            },
-          });
-          return;
-        }
-
-        if (message.type === "rate_limit_event") {
-          yield* offerRuntimeEvent({
-            ...base,
-            type: "account.rate-limits.updated",
-            payload: {
-              rateLimits: message,
-            },
-          });
-          return;
-        }
-      });
+      _context: ClaudeSessionContext,
+      _message: SDKMessage,
+    ): Effect.Effect<void> => Effect.void;
 
     const handleSdkMessage = (
       context: ClaudeSessionContext,
@@ -2809,28 +2672,6 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           createdAt: sessionStartedStamp.createdAt,
           threadId,
           payload: input.resumeCursor !== undefined ? { resume: input.resumeCursor } : {},
-          providerRefs: {},
-        });
-
-        const configuredStamp = yield* makeEventStamp();
-        yield* offerRuntimeEvent({
-          type: "session.configured",
-          eventId: configuredStamp.eventId,
-          provider: PROVIDER,
-          createdAt: configuredStamp.createdAt,
-          threadId,
-          payload: {
-            config: {
-              ...(input.model ? { model: input.model } : {}),
-              ...(input.cwd ? { cwd: input.cwd } : {}),
-              ...(effectiveEffort ? { effort: effectiveEffort } : {}),
-              ...(permissionMode ? { permissionMode } : {}),
-              ...(providerOptions?.maxThinkingTokens !== undefined
-                ? { maxThinkingTokens: providerOptions.maxThinkingTokens }
-                : {}),
-              ...(fastMode ? { fastMode: true } : {}),
-            },
-          },
           providerRefs: {},
         });
 
