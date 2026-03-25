@@ -1,6 +1,6 @@
 import "../../index.css";
 
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_MODEL_BY_PROVIDER, ProjectId, ThreadId } from "@t3tools/contracts";
 import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
@@ -24,7 +24,7 @@ async function mountPicker(props: {
     terminalContexts: [],
     modelSelection: {
       provider: "codex",
-      model: "gpt-5.4",
+      model: DEFAULT_MODEL_BY_PROVIDER["codex"],
       options: {
         ...(props.reasoningEffort ? { reasoningEffort: props.reasoningEffort } : {}),
         ...(props.fastModeEnabled ? { fastMode: true } : {}),

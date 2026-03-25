@@ -1,4 +1,4 @@
-import { type ProviderModelOptions, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_MODEL_BY_PROVIDER, type ProviderModelOptions, ThreadId } from "@t3tools/contracts";
 import "../../index.css";
 
 import { page } from "vitest/browser";
@@ -29,7 +29,7 @@ async function mountMenu(props?: {
     terminalContexts: [],
     modelSelection: {
       provider,
-      model: props?.model ?? "claude-opus-4-6",
+      model: DEFAULT_MODEL_BY_PROVIDER["claudeAgent"],
       ...(props?.modelOptions
         ? {
             options:

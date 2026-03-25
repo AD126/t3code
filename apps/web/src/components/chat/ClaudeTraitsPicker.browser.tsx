@@ -1,6 +1,6 @@
 import "../../index.css";
 
-import { ThreadId } from "@t3tools/contracts";
+import { DEFAULT_MODEL_BY_PROVIDER, ThreadId } from "@t3tools/contracts";
 import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
@@ -27,7 +27,7 @@ async function mountPicker(props?: {
     terminalContexts: [],
     modelSelection: {
       provider: "claudeAgent",
-      model: props?.model ?? "claude-opus-4-6",
+      model: DEFAULT_MODEL_BY_PROVIDER["claudeAgent"],
       options: {
         ...(props?.effort ? { effort: props.effort } : {}),
         ...(props?.thinkingEnabled === false ? { thinking: false } : {}),
@@ -55,7 +55,7 @@ async function mountPicker(props?: {
   const screen = await render(
     <ClaudeTraitsPicker
       threadId={threadId}
-      model={props?.model ?? "claude-opus-4-6"}
+      model={DEFAULT_MODEL_BY_PROVIDER["claudeAgent"]}
       onPromptChange={onPromptChange}
     />,
     { container: host },
