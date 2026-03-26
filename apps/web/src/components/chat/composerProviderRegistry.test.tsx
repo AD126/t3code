@@ -16,6 +16,7 @@ const CODEX_MODELS: ReadonlyArray<ServerProviderModel> = [
       ],
       supportsFastMode: true,
       supportsThinkingToggle: false,
+      contextWindowOptions: [],
       promptInjectedEffortLevels: [],
     },
   },
@@ -30,6 +31,7 @@ const CURSOR_MODELS: ReadonlyArray<ServerProviderModel> = [
       reasoningEffortLevels: [],
       supportsFastMode: false,
       supportsThinkingToggle: false,
+      contextWindowOptions: [],
       promptInjectedEffortLevels: [],
     },
   },
@@ -41,6 +43,7 @@ const CURSOR_MODELS: ReadonlyArray<ServerProviderModel> = [
       reasoningEffortLevels: [],
       supportsFastMode: true,
       supportsThinkingToggle: false,
+      contextWindowOptions: [],
       promptInjectedEffortLevels: [],
     },
   },
@@ -57,6 +60,7 @@ const CURSOR_MODELS: ReadonlyArray<ServerProviderModel> = [
       ],
       supportsFastMode: true,
       supportsThinkingToggle: false,
+      contextWindowOptions: [],
       promptInjectedEffortLevels: [],
     },
   },
@@ -76,6 +80,7 @@ const CLAUDE_MODELS: ReadonlyArray<ServerProviderModel> = [
       ],
       supportsFastMode: true,
       supportsThinkingToggle: false,
+      contextWindowOptions: [],
       promptInjectedEffortLevels: ["ultrathink"],
     },
   },
@@ -92,6 +97,7 @@ const CLAUDE_MODELS: ReadonlyArray<ServerProviderModel> = [
       ],
       supportsFastMode: false,
       supportsThinkingToggle: false,
+      contextWindowOptions: [],
       promptInjectedEffortLevels: ["ultrathink"],
     },
   },
@@ -103,6 +109,7 @@ const CLAUDE_MODELS: ReadonlyArray<ServerProviderModel> = [
       reasoningEffortLevels: [],
       supportsFastMode: false,
       supportsThinkingToggle: true,
+      contextWindowOptions: [],
       promptInjectedEffortLevels: [],
     },
   },
@@ -121,7 +128,9 @@ describe("getComposerProviderState", () => {
     expect(state).toEqual({
       provider: "codex",
       promptEffort: "high",
-      modelOptionsForDispatch: undefined,
+      modelOptionsForDispatch: {
+        reasoningEffort: "high",
+      },
     });
   });
 
@@ -166,12 +175,13 @@ describe("getComposerProviderState", () => {
       provider: "codex",
       promptEffort: "high",
       modelOptionsForDispatch: {
+        reasoningEffort: "high",
         fastMode: true,
       },
     });
   });
 
-  it("drops explicit codex default/off overrides from dispatch while keeping the selected effort label", () => {
+  it("preserves codex default effort explicitly in dispatch options", () => {
     const state = getComposerProviderState({
       provider: "codex",
       model: "gpt-5.4",
@@ -188,7 +198,9 @@ describe("getComposerProviderState", () => {
     expect(state).toEqual({
       provider: "codex",
       promptEffort: "high",
-      modelOptionsForDispatch: undefined,
+      modelOptionsForDispatch: {
+        reasoningEffort: "high",
+      },
     });
   });
 
@@ -204,7 +216,9 @@ describe("getComposerProviderState", () => {
     expect(state).toEqual({
       provider: "claudeAgent",
       promptEffort: "high",
-      modelOptionsForDispatch: undefined,
+      modelOptionsForDispatch: {
+        effort: "high",
+      },
     });
   });
 
@@ -273,6 +287,7 @@ describe("getComposerProviderState", () => {
       provider: "claudeAgent",
       promptEffort: "high",
       modelOptionsForDispatch: {
+        effort: "high",
         fastMode: true,
       },
     });
@@ -348,7 +363,7 @@ describe("getComposerProviderState", () => {
     });
   });
 
-  it("drops explicit Claude default/off overrides from dispatch while keeping the selected effort label", () => {
+  it("preserves Claude default effort explicitly in dispatch options", () => {
     const state = getComposerProviderState({
       provider: "claudeAgent",
       model: "claude-opus-4-6",
@@ -365,7 +380,9 @@ describe("getComposerProviderState", () => {
     expect(state).toEqual({
       provider: "claudeAgent",
       promptEffort: "high",
-      modelOptionsForDispatch: undefined,
+      modelOptionsForDispatch: {
+        effort: "high",
+      },
     });
   });
 });

@@ -2,7 +2,6 @@ import {
   CURSOR_MODEL_FAMILY_OPTIONS,
   MODEL_OPTIONS_BY_PROVIDER,
   type CursorModelOptions,
-  type ModelSlug,
   type ProviderKind,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -64,7 +63,7 @@ function providerIconClassName(
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   provider: ProviderKind;
-  model: ModelSlug;
+  model: string;
   lockedProvider: ProviderKind | null;
   providers?: ReadonlyArray<ServerProvider>;
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
@@ -75,7 +74,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   triggerClassName?: string;
   disabledReason?: string;
   cursorModelOptions: CursorModelOptions | null;
-  onProviderModelChange: (provider: ProviderKind, model: ModelSlug) => void;
+  onProviderModelChange: (provider: ProviderKind, model: string) => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const activeProvider = props.lockedProvider ?? props.provider;
@@ -97,10 +96,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const handleModelChange = (provider: ProviderKind, value: string) => {
     if (props.disabled) return;
     if (!value) return;
-    let resolvedModel: ModelSlug | null = null;
+    let resolvedModel: string | null = null;
     if (provider === "cursor") {
       if (isCursorModelFamilySlug(value)) {
-        resolvedModel = value as ModelSlug;
+        resolvedModel = value;
       } else {
         resolvedModel =
           resolveSelectableModel(provider, value, props.modelOptionsByProvider[provider]) ??
