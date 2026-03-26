@@ -1,7 +1,12 @@
 import * as P from "effect/Predicate";
 
 export function deepMerge<T>(current: T, patch: unknown): T {
-  if (!P.isObject(current) || !P.isObject(patch)) {
+  if (
+    !P.isObject(current) ||
+    !P.isObject(patch) ||
+    Array.isArray(current) ||
+    Array.isArray(patch)
+  ) {
     return patch as T;
   }
 
@@ -10,7 +15,10 @@ export function deepMerge<T>(current: T, patch: unknown): T {
     if (value === undefined) continue;
 
     const existing = next[key];
-    next[key] = P.isObject(existing) && P.isObject(value) ? deepMerge(existing, value) : value;
+    next[key] =
+      P.isObject(existing) && P.isObject(value) && !Array.isArray(existing) && !Array.isArray(value)
+        ? deepMerge(existing, value)
+        : value;
   }
 
   return next as T;
