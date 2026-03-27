@@ -40,6 +40,7 @@ export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
   cursor: Schema.optional(CursorModelOptions),
+  acp: Schema.optional(Schema.Struct({})),
 });
 export type ProviderModelOptions = typeof ProviderModelOptions.Type;
 
@@ -70,6 +71,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
   codex: "gpt-5.4",
   claudeAgent: "claude-sonnet-4-6",
   cursor: "auto",
+  acp: "default",
 };
 
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
@@ -79,6 +81,7 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<ProviderKind,
   codex: "gpt-5.4-mini",
   claudeAgent: "claude-haiku-4-5",
   cursor: "composer-2",
+  acp: "default",
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string, string>> = {
@@ -122,6 +125,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "opus-4.5-thinking": "claude-opus-4-5",
     "opus-4.5": "claude-opus-4-5",
   },
+  acp: {},
 };
 
 // ── Provider display names ────────────────────────────────────────────
@@ -130,4 +134,5 @@ export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   codex: "Codex",
   claudeAgent: "Claude",
   cursor: "Cursor",
+  acp: "ACP Agent",
 };

@@ -56,6 +56,8 @@ import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnap
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ProviderService } from "./provider/Services/ProviderService";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
+import { AcpAgentRegistry } from "./provider/Services/AcpAgentRegistry.ts";
+import { AcpRegistryClient } from "./provider/Services/AcpRegistryClient.ts";
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
 import { clamp } from "effect/Number";
 import { Open, resolveAvailableEditors } from "./open";
@@ -209,7 +211,9 @@ export type ServerCoreRuntimeServices =
   | CheckpointDiffQuery
   | OrchestrationReactor
   | ProviderService
-  | ProviderRegistry;
+  | ProviderRegistry
+  | AcpAgentRegistry
+  | AcpRegistryClient;
 
 export type ServerRuntimeServices =
   | ServerCoreRuntimeServices
@@ -257,6 +261,8 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const keybindingsManager = yield* Keybindings;
   const serverSettingsManager = yield* ServerSettingsService;
   const providerRegistry = yield* ProviderRegistry;
+  const acpAgentRegistry = yield* AcpAgentRegistry;
+  const acpRegistryClient = yield* AcpRegistryClient;
   const git = yield* GitCore;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -905,12 +911,14 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const keybindingsConfig = yield* keybindingsManager.loadConfigState;
         const settings = yield* serverSettingsManager.getSettings;
         const providers = yield* Ref.get(providersRef);
+        const acpAgentServers = yield* acpAgentRegistry.listStatuses;
         return {
           cwd,
           keybindingsConfigPath,
           keybindings: keybindingsConfig.keybindings,
           issues: keybindingsConfig.issues,
           providers,
+          acpAgentServers,
           availableEditors,
           settings,
         };
@@ -935,6 +943,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.serverUpdateSettings: {
         const body = stripRequestTag(request.body);
         return yield* serverSettingsManager.updateSettings(body.patch);
+      }
+
+      case WS_METHODS.serverListAcpRegistry: {
+        return yield* acpRegistryClient.listAgents;
       }
 
       default: {

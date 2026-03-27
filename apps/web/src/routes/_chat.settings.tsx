@@ -1,7 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowUpCircleIcon,
+  CheckIcon,
   ChevronDownIcon,
+  GlobeIcon,
   InfoIcon,
   LoaderIcon,
   PlusIcon,
@@ -10,16 +13,21 @@ import {
   Undo2Icon,
   XIcon,
 } from "lucide-react";
+import { GitHubIcon } from "../components/Icons";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
+  type AcpAgentServer,
+  type ModelSelection,
+  type ResolvedRegistryAcpAgent,
   PROVIDER_DISPLAY_NAMES,
-  type ProviderKind,
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { useSettings, useUpdateSettings } from "../hooks/useSettings";
 import {
+  type BuiltInProviderKind,
+  getModelSelectionOptions,
   getCustomModelOptionsByProvider,
   MAX_CUSTOM_MODEL_LENGTH,
   resolveAppModelSelectionState,
@@ -27,6 +35,15 @@ import {
 import { APP_VERSION } from "../branding";
 import { Button } from "../components/ui/button";
 import { Collapsible, CollapsibleContent } from "../components/ui/collapsible";
+import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+  DialogTrigger,
+} from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import {
   Select,
@@ -44,7 +61,11 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip"
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
-import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
+import {
+  serverAcpRegistryQueryOptions,
+  serverConfigQueryOptions,
+  serverQueryKeys,
+} from "../lib/serverReactQuery";
 import { cn } from "../lib/utils";
 import { formatRelativeTime } from "../timestampFormat";
 import { ensureNativeApi, readNativeApi } from "../nativeApi";
@@ -77,8 +98,58 @@ const TIMESTAMP_FORMAT_LABELS = {
 
 const EMPTY_SERVER_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 
+function slugifyAcpAgentId(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "acp-agent";
+}
+
+function parseArgsInput(value: string): string[] {
+  return value
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function getBinaryLaunchSpec(
+  input: ResolvedRegistryAcpAgent,
+): { command: string; args: string[] } | null {
+  const binary = input.agent.distribution.binary;
+  if (!binary) return null;
+  // Try current platform key (e.g. "darwin-arm64", "linux-x64")
+  const platformKey = `${navigator.platform.includes("Mac") ? "darwin" : navigator.platform.includes("Win") ? "windows" : "linux"}-${navigator.userAgent.includes("arm") ? "arm64" : "x64"}`;
+  const entry = binary[platformKey] ?? Object.values(binary)[0];
+  if (!entry) return null;
+  return { command: entry.cmd, args: entry.args ? [...entry.args] : [] };
+}
+
+function makeImportedAcpAgent(input: ResolvedRegistryAcpAgent): AcpAgentServer {
+  const launch = input.launch ??
+    getBinaryLaunchSpec(input) ?? {
+      command: input.agent.id,
+      args: [],
+    };
+  return {
+    id: input.agent.id,
+    name: input.agent.name,
+    enabled: true,
+    source: "registry",
+    distributionType: input.distributionType,
+    registryAgentId: input.agent.id,
+    importedVersion: input.agent.version,
+    description: input.agent.description,
+    ...(input.agent.website ? { website: input.agent.website } : {}),
+    ...(input.agent.repository ? { repository: input.agent.repository } : {}),
+    ...(input.agent.icon ? { iconUrl: input.agent.icon } : {}),
+    launch,
+  };
+}
+
 type InstallProviderSettings = {
-  provider: ProviderKind;
+  provider: BuiltInProviderKind;
   title: string;
   binaryPlaceholder: string;
   binaryDescription: ReactNode;
@@ -294,9 +365,12 @@ function SettingsRouteView() {
   const settings = useSettings();
   const { updateSettings, resetSettings } = useUpdateSettings();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
+  const acpRegistryQuery = useQuery(serverAcpRegistryQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
-  const [openProviderDetails, setOpenProviderDetails] = useState<Record<ProviderKind, boolean>>({
+  const [openProviderDetails, setOpenProviderDetails] = useState<
+    Record<BuiltInProviderKind, boolean>
+  >({
     codex: Boolean(
       settings.providers.codex.binaryPath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.binaryPath ||
       settings.providers.codex.homePath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.homePath ||
@@ -316,16 +390,25 @@ function SettingsRouteView() {
     ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
-    Record<ProviderKind, string>
+    Record<BuiltInProviderKind, string>
   >({
     codex: "",
     claudeAgent: "",
     cursor: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
-    Partial<Record<ProviderKind, string | null>>
+    Partial<Record<BuiltInProviderKind, string | null>>
   >({});
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
+  const [acpDialogOpen, setAcpDialogOpen] = useState(false);
+  const [acpDialogTab, setAcpDialogTab] = useState<"registry" | "manual">("registry");
+  const [acpRegistrySearch, setAcpRegistrySearch] = useState("");
+  const [openAcpAgentDetails, setOpenAcpAgentDetails] = useState<Record<string, boolean>>({});
+  const [manualAcpName, setManualAcpName] = useState("");
+  const [manualAcpCommand, setManualAcpCommand] = useState("");
+  const [manualAcpArgs, setManualAcpArgs] = useState("");
+  const [manualAcpEnabled, setManualAcpEnabled] = useState(true);
+  const [manualAcpError, setManualAcpError] = useState<string | null>(null);
   const refreshingRef = useRef(false);
   const queryClient = useQueryClient();
   useRelativeTimeTick();
@@ -347,17 +430,30 @@ function SettingsRouteView() {
       });
   }, [queryClient]);
 
-  const modelListRefs = useRef<Partial<Record<ProviderKind, HTMLDivElement | null>>>({});
+  const modelListRefs = useRef<Partial<Record<BuiltInProviderKind, HTMLDivElement | null>>>({});
 
   const codexHomePath = settings.providers.codex.homePath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
   const serverProviders = serverConfigQuery.data?.providers ?? EMPTY_SERVER_PROVIDERS;
+  const acpAgentStatuses = serverConfigQuery.data?.acpAgentServers ?? [];
+  const registeredAcpAgents = settings.providers.acp.agentServers;
+  const filteredRegistryAgents = (acpRegistryQuery.data?.agents ?? []).filter((entry) => {
+    const search = acpRegistrySearch.trim().toLowerCase();
+    if (!search) {
+      return true;
+    }
+    return (
+      entry.agent.name.toLowerCase().includes(search) ||
+      entry.agent.id.toLowerCase().includes(search) ||
+      entry.agent.description.toLowerCase().includes(search)
+    );
+  });
 
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenProvider = textGenerationModelSelection.provider;
   const textGenModel = textGenerationModelSelection.model;
-  const textGenModelOptions = textGenerationModelSelection.options;
+  const textGenModelOptions = getModelSelectionOptions(textGenerationModelSelection);
   const gitModelOptionsByProvider = getCustomModelOptionsByProvider(
     settings,
     serverProviders,
@@ -372,6 +468,10 @@ function SettingsRouteView() {
   const isGitWritingModelDirty = !Equal.equals(
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
+  );
+  const areAcpSettingsDirty = !Equal.equals(
+    settings.providers.acp,
+    DEFAULT_UNIFIED_SETTINGS.providers.acp,
   );
   const changedSettingLabels = [
     ...(theme !== "system" ? ["Theme"] : []),
@@ -392,6 +492,7 @@ function SettingsRouteView() {
       : []),
     ...(isGitWritingModelDirty ? ["Git writing model"] : []),
     ...(areProviderSettingsDirty ? ["Providers"] : []),
+    ...(areAcpSettingsDirty ? ["ACP Agents"] : []),
   ];
 
   const openKeybindingsFile = useCallback(() => {
@@ -418,7 +519,7 @@ function SettingsRouteView() {
   }, [availableEditors, keybindingsConfigPath]);
 
   const addCustomModel = useCallback(
-    (provider: ProviderKind) => {
+    (provider: BuiltInProviderKind) => {
       const customModelInput = customModelInputByProvider[provider];
       const customModels = settings.providers[provider].customModels;
       const normalized = normalizeModelSlug(customModelInput, provider);
@@ -492,7 +593,7 @@ function SettingsRouteView() {
   );
 
   const removeCustomModel = useCallback(
-    (provider: ProviderKind, slug: string) => {
+    (provider: BuiltInProviderKind, slug: string) => {
       const customModels = settings.providers[provider].customModels;
       updateSettings({
         providers: {
@@ -510,6 +611,90 @@ function SettingsRouteView() {
     },
     [settings, updateSettings],
   );
+
+  const upsertAcpAgent = useCallback(
+    (agent: AcpAgentServer) => {
+      const existingIndex = settings.providers.acp.agentServers.findIndex(
+        (candidate) => candidate.id === agent.id,
+      );
+      const nextAgents = [...settings.providers.acp.agentServers];
+      if (existingIndex >= 0) {
+        nextAgents[existingIndex] = agent;
+      } else {
+        nextAgents.push(agent);
+      }
+      updateSettings({
+        providers: {
+          ...settings.providers,
+          acp: {
+            ...settings.providers.acp,
+            agentServers: nextAgents,
+          },
+        },
+      });
+      void queryClient.invalidateQueries({ queryKey: serverQueryKeys.config() });
+    },
+    [queryClient, settings.providers, updateSettings],
+  );
+
+  const removeAcpAgent = useCallback(
+    (agentId: string) => {
+      updateSettings({
+        providers: {
+          ...settings.providers,
+          acp: {
+            ...settings.providers.acp,
+            agentServers: settings.providers.acp.agentServers.filter(
+              (agent) => agent.id !== agentId,
+            ),
+          },
+        },
+      });
+      void queryClient.invalidateQueries({ queryKey: serverQueryKeys.config() });
+    },
+    [queryClient, settings.providers, updateSettings],
+  );
+
+  const addManualAcpAgent = useCallback(() => {
+    const name = manualAcpName.trim();
+    const command = manualAcpCommand.trim();
+    if (!name) {
+      setManualAcpError("Enter an ACP agent name.");
+      return;
+    }
+    if (!command || /\s/.test(command)) {
+      setManualAcpError("Enter a plain executable command, not a shell snippet.");
+      return;
+    }
+    const id = slugifyAcpAgentId(name);
+    if (settings.providers.acp.agentServers.some((agent) => agent.id === id)) {
+      setManualAcpError("An ACP agent with that name already exists.");
+      return;
+    }
+    upsertAcpAgent({
+      id,
+      name,
+      enabled: manualAcpEnabled,
+      source: "manual",
+      distributionType: "manual",
+      launch: {
+        command,
+        args: parseArgsInput(manualAcpArgs),
+      },
+    });
+    setManualAcpName("");
+    setManualAcpCommand("");
+    setManualAcpArgs("");
+    setManualAcpEnabled(true);
+    setManualAcpError(null);
+  }, [
+    manualAcpArgs,
+    manualAcpCommand,
+    manualAcpEnabled,
+    manualAcpName,
+    settings.providers.acp.agentServers,
+    upsertAcpAgent,
+  ]);
 
   const providerCards = PROVIDER_SETTINGS.map((providerSettings) => {
     const liveProvider = serverProviders.find(
@@ -855,6 +1040,9 @@ function SettingsRouteView() {
                       triggerVariant="outline"
                       triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
                       onProviderModelChange={(provider, model) => {
+                        if (provider === "acp") {
+                          return;
+                        }
                         updateSettings({
                           textGenerationModelSelection: resolveAppModelSelectionState(
                             {
@@ -880,15 +1068,21 @@ function SettingsRouteView() {
                       triggerVariant="outline"
                       triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
                       onModelOptionsChange={(nextOptions) => {
+                        const nextSelection: ModelSelection = nextOptions
+                          ? ({
+                              provider: textGenProvider,
+                              model: textGenModel,
+                              options: nextOptions,
+                            } as ModelSelection)
+                          : ({
+                              provider: textGenProvider,
+                              model: textGenModel,
+                            } as ModelSelection);
                         updateSettings({
                           textGenerationModelSelection: resolveAppModelSelectionState(
                             {
                               ...settings,
-                              textGenerationModelSelection: {
-                                provider: textGenProvider,
-                                model: textGenModel,
-                                ...(nextOptions ? { options: nextOptions } : {}),
-                              },
+                              textGenerationModelSelection: nextSelection,
                             },
                             serverProviders,
                           ),
@@ -1281,6 +1475,470 @@ function SettingsRouteView() {
                   </div>
                 );
               })}
+            </SettingsSection>
+
+            <SettingsSection
+              title="ACP Agents"
+              headerAction={
+                <div className="flex items-center gap-2">
+                  {areAcpSettingsDirty ? (
+                    <SettingResetButton
+                      label="ACP agents"
+                      onClick={() =>
+                        updateSettings({
+                          providers: {
+                            ...settings.providers,
+                            acp: DEFAULT_UNIFIED_SETTINGS.providers.acp,
+                          },
+                        })
+                      }
+                    />
+                  ) : null}
+                  <Dialog
+                    open={acpDialogOpen}
+                    onOpenChange={(open) => {
+                      setAcpDialogOpen(open);
+                      if (!open) {
+                        setAcpRegistrySearch("");
+                        setManualAcpError(null);
+                      }
+                    }}
+                  >
+                    <DialogTrigger
+                      render={
+                        <Button size="xs" variant="outline">
+                          <PlusIcon className="size-3" />
+                          Add agent
+                        </Button>
+                      }
+                    />
+                    <DialogPopup className="h-[80dvh] max-w-4xl">
+                      <DialogHeader>
+                        <DialogTitle>Add ACP Agent</DialogTitle>
+                        <DialogDescription>
+                          Install an agent from the public registry or configure one manually.
+                        </DialogDescription>
+                        <div className="flex gap-1 rounded-lg border border-border/60 bg-muted/50 p-1">
+                          <button
+                            type="button"
+                            className={cn(
+                              "flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                              acpDialogTab === "registry"
+                                ? "bg-background text-foreground shadow-xs"
+                                : "text-muted-foreground hover:text-foreground",
+                            )}
+                            onClick={() => setAcpDialogTab("registry")}
+                          >
+                            Registry
+                          </button>
+                          <button
+                            type="button"
+                            className={cn(
+                              "flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                              acpDialogTab === "manual"
+                                ? "bg-background text-foreground shadow-xs"
+                                : "text-muted-foreground hover:text-foreground",
+                            )}
+                            onClick={() => setAcpDialogTab("manual")}
+                          >
+                            Manual
+                          </button>
+                        </div>
+                      </DialogHeader>
+                      <DialogPanel>
+                        {acpDialogTab === "registry" ? (
+                          <div className="space-y-3">
+                            <Input
+                              value={acpRegistrySearch}
+                              onChange={(event) => setAcpRegistrySearch(event.target.value)}
+                              placeholder="Search ACP registry"
+                              spellCheck={false}
+                            />
+                            {acpRegistryQuery.isError ? (
+                              <p className="text-xs text-destructive">
+                                {acpRegistryQuery.error instanceof Error
+                                  ? acpRegistryQuery.error.message
+                                  : "Failed to load ACP registry."}
+                              </p>
+                            ) : null}
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                              {filteredRegistryAgents.map((entry) => {
+                                const installedAgent = registeredAcpAgents.find(
+                                  (agent) => agent.registryAgentId === entry.agent.id,
+                                );
+                                const isInstalled = Boolean(installedAgent);
+                                const isUpToDate =
+                                  isInstalled &&
+                                  installedAgent?.importedVersion === entry.agent.version;
+                                const importedAgent = makeImportedAcpAgent(entry);
+                                return (
+                                  <div
+                                    key={entry.agent.id}
+                                    className="flex flex-col rounded-xl border border-border/60 bg-background/60 p-3"
+                                  >
+                                    <div className="flex flex-1 items-start gap-3">
+                                      {entry.agent.icon ? (
+                                        <img
+                                          src={entry.agent.icon}
+                                          alt=""
+                                          className="size-8 shrink-0 rounded-lg dark:invert"
+                                        />
+                                      ) : (
+                                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-medium text-muted-foreground">
+                                          {entry.agent.name.charAt(0).toUpperCase()}
+                                        </div>
+                                      )}
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="truncate text-sm font-medium text-foreground">
+                                            {entry.agent.name}
+                                          </span>
+                                          <code className="shrink-0 text-[10px] text-muted-foreground">
+                                            v{entry.agent.version}
+                                          </code>
+                                        </div>
+                                        <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+                                          {entry.agent.description}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="mt-3 flex items-center justify-between">
+                                      <div className="flex items-center gap-1">
+                                        {entry.agent.repository ? (
+                                          <Tooltip>
+                                            <TooltipTrigger
+                                              render={
+                                                <button
+                                                  type="button"
+                                                  className="inline-flex size-6 items-center justify-center rounded-md text-foreground/70 transition-colors hover:text-foreground"
+                                                  onClick={() =>
+                                                    void ensureNativeApi().shell.openExternal(
+                                                      entry.agent.repository!,
+                                                    )
+                                                  }
+                                                />
+                                              }
+                                            >
+                                              <GitHubIcon className="size-3.5" />
+                                            </TooltipTrigger>
+                                            <TooltipPopup side="bottom">Repository</TooltipPopup>
+                                          </Tooltip>
+                                        ) : null}
+                                        {entry.agent.website ? (
+                                          <Tooltip>
+                                            <TooltipTrigger
+                                              render={
+                                                <button
+                                                  type="button"
+                                                  className="inline-flex size-6 items-center justify-center rounded-md text-foreground/70 transition-colors hover:text-foreground"
+                                                  onClick={() =>
+                                                    void ensureNativeApi().shell.openExternal(
+                                                      entry.agent.website!,
+                                                    )
+                                                  }
+                                                />
+                                              }
+                                            >
+                                              <GlobeIcon className="size-3.5" />
+                                            </TooltipTrigger>
+                                            <TooltipPopup side="bottom">Website</TooltipPopup>
+                                          </Tooltip>
+                                        ) : null}
+                                      </div>
+                                      {isUpToDate ? (
+                                        <span className="flex items-center gap-1 text-xs text-success">
+                                          <CheckIcon className="size-3" />
+                                          Installed
+                                        </span>
+                                      ) : isInstalled ? (
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          className="border-amber-500/40 text-amber-400 hover:border-amber-500/60 hover:text-amber-300"
+                                          onClick={() => upsertAcpAgent(importedAgent)}
+                                        >
+                                          <ArrowUpCircleIcon className="size-3" />
+                                          Update
+                                        </Button>
+                                      ) : (
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          onClick={() => upsertAcpAgent(importedAgent)}
+                                        >
+                                          <PlusIcon className="size-3" />
+                                          Add
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {!acpRegistryQuery.isLoading && filteredRegistryAgents.length === 0 ? (
+                              <p className="py-6 text-center text-xs text-muted-foreground">
+                                No ACP registry agents found.
+                              </p>
+                            ) : null}
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] text-muted-foreground">
+                                {settings.providers.acp.registryUrl}
+                              </span>
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                onClick={() =>
+                                  void queryClient.invalidateQueries({
+                                    queryKey: serverQueryKeys.acpRegistry(),
+                                  })
+                                }
+                                disabled={acpRegistryQuery.isFetching}
+                              >
+                                {acpRegistryQuery.isFetching ? (
+                                  <LoaderIcon className="size-3 animate-spin" />
+                                ) : (
+                                  <RefreshCwIcon className="size-3" />
+                                )}
+                                Refresh
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            <p className="text-xs text-muted-foreground">
+                              Register an unpublished or private local ACP server by providing its
+                              executable command.
+                            </p>
+                            <div className="space-y-3">
+                              <label className="block">
+                                <span className="mb-1.5 block text-xs font-medium text-foreground">
+                                  Display name
+                                </span>
+                                <Input
+                                  value={manualAcpName}
+                                  onChange={(event) => {
+                                    setManualAcpName(event.target.value);
+                                    if (manualAcpError) setManualAcpError(null);
+                                  }}
+                                  placeholder="My Agent"
+                                  spellCheck={false}
+                                />
+                              </label>
+                              <label className="block">
+                                <span className="mb-1.5 block text-xs font-medium text-foreground">
+                                  Launch command
+                                </span>
+                                <Input
+                                  value={manualAcpCommand}
+                                  onChange={(event) => {
+                                    setManualAcpCommand(event.target.value);
+                                    if (manualAcpError) setManualAcpError(null);
+                                  }}
+                                  placeholder="my-agent"
+                                  spellCheck={false}
+                                />
+                                <span className="mt-1 block text-[11px] text-muted-foreground">
+                                  A single executable name or path. No shell syntax.
+                                </span>
+                              </label>
+                              <label className="block">
+                                <span className="mb-1.5 block text-xs font-medium text-foreground">
+                                  Arguments
+                                </span>
+                                <Input
+                                  value={manualAcpArgs}
+                                  onChange={(event) => setManualAcpArgs(event.target.value)}
+                                  placeholder="--port 3000 --verbose"
+                                  spellCheck={false}
+                                />
+                                <span className="mt-1 block text-[11px] text-muted-foreground">
+                                  Space-separated arguments passed to the launch command.
+                                </span>
+                              </label>
+                            </div>
+                            {manualAcpError ? (
+                              <p className="text-xs text-destructive">{manualAcpError}</p>
+                            ) : null}
+                            <Button
+                              variant="outline"
+                              className="w-full"
+                              onClick={() => {
+                                addManualAcpAgent();
+                                if (
+                                  manualAcpName.trim() &&
+                                  manualAcpCommand.trim() &&
+                                  !/\s/.test(manualAcpCommand.trim()) &&
+                                  !settings.providers.acp.agentServers.some(
+                                    (agent) => agent.id === slugifyAcpAgentId(manualAcpName.trim()),
+                                  )
+                                ) {
+                                  setAcpDialogOpen(false);
+                                }
+                              }}
+                            >
+                              <PlusIcon className="size-3.5" />
+                              Add ACP Agent
+                            </Button>
+                          </div>
+                        )}
+                      </DialogPanel>
+                    </DialogPopup>
+                  </Dialog>
+                </div>
+              }
+            >
+              {registeredAcpAgents.map((agent) => {
+                const status = acpAgentStatuses.find(
+                  (candidate) => candidate.agentServerId === agent.id,
+                );
+                return (
+                  <div
+                    key={agent.id}
+                    className="border-t border-border first:border-t-0"
+                    data-slot="settings-row"
+                  >
+                    <div className="px-4 py-4 sm:px-5">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex min-h-5 items-center gap-1.5">
+                            <span
+                              className={cn(
+                                "size-2 shrink-0 rounded-full",
+                                agent.enabled ? "bg-success" : "bg-amber-400",
+                              )}
+                            />
+                            <h3 className="text-sm font-medium text-foreground">{agent.name}</h3>
+                            {agent.importedVersion ? (
+                              <code className="text-xs text-muted-foreground">
+                                v{agent.importedVersion}
+                              </code>
+                            ) : null}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {agent.source === "registry"
+                              ? `Imported from ACP registry${agent.importedVersion ? ` (v${agent.importedVersion})` : ""}`
+                              : "Manually configured ACP agent"}
+                            {status?.message ? ` — ${status.message}` : null}
+                          </p>
+                        </div>
+                        <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                            onClick={() => removeAcpAgent(agent.id)}
+                          >
+                            Remove
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                            onClick={() =>
+                              setOpenAcpAgentDetails((existing) => ({
+                                ...existing,
+                                [agent.id]: !existing[agent.id],
+                              }))
+                            }
+                            aria-label={`Toggle ${agent.name} details`}
+                          >
+                            <ChevronDownIcon
+                              className={cn(
+                                "size-3.5 transition-transform",
+                                openAcpAgentDetails[agent.id] && "rotate-180",
+                              )}
+                            />
+                          </Button>
+                          <Switch
+                            checked={agent.enabled}
+                            onCheckedChange={(checked) =>
+                              upsertAcpAgent({ ...agent, enabled: Boolean(checked) })
+                            }
+                            aria-label={`Enable ${agent.name}`}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <Collapsible
+                      open={Boolean(openAcpAgentDetails[agent.id])}
+                      onOpenChange={(open) =>
+                        setOpenAcpAgentDetails((existing) => ({
+                          ...existing,
+                          [agent.id]: open,
+                        }))
+                      }
+                    >
+                      <CollapsibleContent>
+                        <div className="space-y-0">
+                          <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                            <label htmlFor={`acp-agent-${agent.id}-command`} className="block">
+                              <span className="text-xs font-medium text-foreground">
+                                Launch command
+                              </span>
+                              <Input
+                                id={`acp-agent-${agent.id}-command`}
+                                className="mt-1.5"
+                                value={agent.launch.command}
+                                onChange={(event) =>
+                                  upsertAcpAgent({
+                                    ...agent,
+                                    launch: {
+                                      ...agent.launch,
+                                      command: event.target.value,
+                                    },
+                                  })
+                                }
+                                placeholder="Executable command"
+                                spellCheck={false}
+                              />
+                              <span className="mt-1 block text-xs text-muted-foreground">
+                                The executable used to start this ACP agent.
+                              </span>
+                            </label>
+                          </div>
+                          <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                            <label htmlFor={`acp-agent-${agent.id}-args`} className="block">
+                              <span className="text-xs font-medium text-foreground">Arguments</span>
+                              <Input
+                                id={`acp-agent-${agent.id}-args`}
+                                className="mt-1.5"
+                                value={agent.launch.args.join(" ")}
+                                onChange={(event) =>
+                                  upsertAcpAgent({
+                                    ...agent,
+                                    launch: {
+                                      ...agent.launch,
+                                      args: parseArgsInput(event.target.value),
+                                    },
+                                  })
+                                }
+                                placeholder="Space-separated arguments"
+                                spellCheck={false}
+                              />
+                              <span className="mt-1 block text-xs text-muted-foreground">
+                                Additional arguments passed to the launch command.
+                              </span>
+                            </label>
+                          </div>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </div>
+                );
+              })}
+
+              {registeredAcpAgents.length === 0 ? (
+                <div
+                  className="border-t border-border px-4 py-4 first:border-t-0 sm:px-5"
+                  data-slot="settings-row"
+                >
+                  <p className="text-xs text-muted-foreground">
+                    No ACP agents registered. Click "Add agent" to browse the registry or configure
+                    one manually.
+                  </p>
+                </div>
+              ) : null}
             </SettingsSection>
 
             <SettingsSection title="Advanced">

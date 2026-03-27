@@ -1058,6 +1058,97 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("full-access");
   });
 
+  it("marks the thread session errored when sendTurn fails after the session is running", async () => {
+    const harness = await createHarness({
+      threadModelSelection: { provider: "acp", model: "default", agentServerId: "mistral-vibe" },
+    });
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-send-failure-1"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-send-failure-1"),
+          role: "user",
+          text: "first",
+          attachments: [],
+        },
+        modelSelection: {
+          provider: "acp",
+          model: "default",
+          agentServerId: "mistral-vibe",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    harness.sendTurn.mockImplementationOnce(
+      (_: unknown) =>
+        Effect.fail(
+          new ProviderAdapterRequestError({
+            provider: "acp",
+            method: "session/prompt",
+            detail: "Invalid API key. Please check your API key and try again.",
+          }),
+        ) as unknown as Effect.Effect<{ threadId: ThreadId; turnId: TurnId }, never, never>,
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-send-failure-2"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-send-failure-2"),
+          role: "user",
+          text: "second",
+          attachments: [],
+        },
+        modelSelection: {
+          provider: "acp",
+          model: "default",
+          agentServerId: "mistral-vibe",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(async () => {
+      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const thread = readModel.threads.find(
+        (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      );
+      return thread?.session?.status === "error";
+    });
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+    expect(thread?.session).toMatchObject({
+      threadId: "thread-1",
+      status: "error",
+      providerName: "acp",
+      runtimeMode: "approval-required",
+      activeTurnId: null,
+      lastError: expect.stringContaining("Invalid API key"),
+    });
+    expect(
+      thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
+    ).toMatchObject({
+      payload: {
+        detail: expect.stringContaining("Invalid API key"),
+      },
+    });
+  });
+
   it("reacts to thread.turn.interrupt-requested by calling provider interrupt", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

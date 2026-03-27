@@ -51,7 +51,8 @@ const makeRoutingTextGeneration = Effect.gen(function* () {
     cursor,
   };
 
-  const route = (provider: TextGenerationProvider) => providerToService[provider];
+  const route = (provider: string) =>
+    providerToService[provider as TextGenerationProvider] ?? providerToService.codex;
 
   return {
     generateCommitMessage: (input) =>

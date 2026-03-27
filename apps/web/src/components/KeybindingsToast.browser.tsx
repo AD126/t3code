@@ -55,6 +55,7 @@ function createBaseServerConfig(): ServerConfig {
         models: [],
       },
     ],
+    acpAgentServers: [],
     availableEditors: [],
     settings: {
       enableAssistantStreaming: false,
@@ -64,6 +65,7 @@ function createBaseServerConfig(): ServerConfig {
         codex: { enabled: true, binaryPath: "", homePath: "", customModels: [] },
         claudeAgent: { enabled: true, binaryPath: "", customModels: [] },
         cursor: { enabled: true, binaryPath: "", apiEndpoint: "", customModels: [] },
+        acp: { enabled: true, registryUrl: "", agentServers: [] },
       },
     },
   };

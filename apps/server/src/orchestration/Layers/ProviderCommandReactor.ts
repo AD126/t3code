@@ -186,6 +186,30 @@ const make = Effect.gen(function* () {
       createdAt: input.createdAt,
     });
 
+  const setThreadSessionErrorIfActive = (input: {
+    readonly threadId: ThreadId;
+    readonly detail: string;
+    readonly createdAt: string;
+  }) =>
+    Effect.gen(function* () {
+      const thread = yield* resolveThread(input.threadId);
+      if (!thread?.session || thread.session.status === "stopped") {
+        return;
+      }
+
+      yield* setThreadSession({
+        threadId: input.threadId,
+        session: {
+          ...thread.session,
+          status: "error",
+          activeTurnId: null,
+          lastError: input.detail,
+          updatedAt: input.createdAt,
+        },
+        createdAt: input.createdAt,
+      });
+    });
+
   const setThreadSession = (input: {
     readonly threadId: ThreadId;
     readonly session: OrchestrationSession;
@@ -501,16 +525,24 @@ const make = Effect.gen(function* () {
       interactionMode: event.payload.interactionMode,
       createdAt: event.payload.createdAt,
     }).pipe(
-      Effect.catchCause((cause) =>
-        appendProviderFailureActivity({
-          threadId: event.payload.threadId,
-          kind: "provider.turn.start.failed",
-          summary: "Provider turn start failed",
-          detail: Cause.pretty(cause),
-          turnId: null,
-          createdAt: event.payload.createdAt,
-        }),
-      ),
+      Effect.catchCause((cause) => {
+        const detail = Cause.pretty(cause);
+        return Effect.gen(function* () {
+          yield* appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.turn.start.failed",
+            summary: "Provider turn start failed",
+            detail,
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          });
+          yield* setThreadSessionErrorIfActive({
+            threadId: event.payload.threadId,
+            detail,
+            createdAt: event.payload.createdAt,
+          });
+        });
+      }),
     );
   });
 

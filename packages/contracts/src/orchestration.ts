@@ -1,4 +1,5 @@
 import { Option, Schema, SchemaIssue, Struct } from "effect";
+import { AcpAgentServerId } from "./acp";
 import { ClaudeModelOptions, CodexModelOptions, CursorModelOptions } from "./model";
 import {
   ApprovalRequestId,
@@ -27,7 +28,7 @@ export const ORCHESTRATION_WS_CHANNELS = {
   domainEvent: "orchestration.domainEvent",
 } as const;
 
-export const ProviderKind = Schema.Literals(["codex", "claudeAgent", "cursor"]);
+export const ProviderKind = Schema.Literals(["codex", "claudeAgent", "cursor", "acp"]);
 export type ProviderKind = typeof ProviderKind.Type;
 export const ProviderApprovalPolicy = Schema.Literals([
   "untrusted",
@@ -65,10 +66,18 @@ export const CursorModelSelection = Schema.Struct({
 });
 export type CursorModelSelection = typeof CursorModelSelection.Type;
 
+export const AcpModelSelection = Schema.Struct({
+  provider: Schema.Literal("acp"),
+  agentServerId: AcpAgentServerId,
+  model: TrimmedNonEmptyString,
+});
+export type AcpModelSelection = typeof AcpModelSelection.Type;
+
 export const ModelSelection = Schema.Union([
   CodexModelSelection,
   ClaudeModelSelection,
   CursorModelSelection,
+  AcpModelSelection,
 ]);
 export type ModelSelection = typeof ModelSelection.Type;
 

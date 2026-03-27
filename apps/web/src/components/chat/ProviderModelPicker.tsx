@@ -1,9 +1,10 @@
-import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
+import { type AcpAgentServer, type ProviderKind, type ServerProvider } from "@t3tools/contracts";
 import { resolveModelSlugForProvider, resolveSelectableModel } from "@t3tools/shared/model";
 import { memo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { type ProviderPickerKind, PROVIDER_OPTIONS } from "../../session-logic";
-import { ChevronDownIcon } from "lucide-react";
+import { type BuiltInProviderKind } from "../../modelSelection";
+import { BotIcon, ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
 import {
   Menu,
@@ -23,17 +24,18 @@ import { cn } from "~/lib/utils";
 import { getProviderSnapshot } from "../../providerModels";
 
 function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
-  value: ProviderKind;
+  value: BuiltInProviderKind;
   label: string;
   available: true;
 } {
   return option.available;
 }
 
-const PROVIDER_ICON_BY_PROVIDER: Record<ProviderPickerKind, Icon> = {
+const PROVIDER_ICON_BY_PROVIDER: Record<ProviderPickerKind | "acp", Icon> = {
   codex: OpenAI,
   claudeAgent: ClaudeAI,
   cursor: CursorIcon,
+  acp: OpenCodeIcon,
 };
 
 export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
@@ -47,8 +49,69 @@ function providerIconClassName(
   provider: ProviderKind | ProviderPickerKind,
   fallbackClassName: string,
 ): string {
-  return provider === "claudeAgent" ? "text-[#d97757]" : fallbackClassName;
+  if (provider === "claudeAgent") {
+    return "text-[#d97757]";
+  }
+  if (provider === "acp") {
+    return "text-foreground/85";
+  }
+  return fallbackClassName;
 }
+
+const AcpAgentIcon = memo(function AcpAgentIcon(props: {
+  iconUrl?: string | undefined;
+  className?: string | undefined;
+  fallbackClassName?: string | undefined;
+}) {
+  const [failedIconUrl, setFailedIconUrl] = useState<string | null>(null);
+  const iconUrl =
+    props.iconUrl && props.iconUrl !== failedIconUrl
+      ? props.iconUrl.trim() || undefined
+      : undefined;
+
+  if (iconUrl) {
+    return (
+      <img
+        aria-hidden="true"
+        src={iconUrl}
+        alt=""
+        className={cn(
+          "size-4 shrink-0 object-contain opacity-80 dark:invert dark:opacity-85",
+          props.className,
+        )}
+        onError={() => setFailedIconUrl(iconUrl)}
+      />
+    );
+  }
+
+  return (
+    <BotIcon
+      aria-hidden="true"
+      className={cn(
+        "size-4 shrink-0",
+        providerIconClassName("acp", props.fallbackClassName ?? "text-foreground/85"),
+        props.className,
+      )}
+    />
+  );
+});
+
+const AcpAgentLabel = memo(function AcpAgentLabel(props: {
+  name: string;
+  iconUrl?: string | undefined;
+  iconClassName?: string | undefined;
+}) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-2">
+      <AcpAgentIcon
+        iconUrl={props.iconUrl}
+        className={props.iconClassName}
+        fallbackClassName="text-foreground/85"
+      />
+      <span className="truncate">{props.name}</span>
+    </span>
+  );
+});
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   provider: ProviderKind;
@@ -56,6 +119,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   lockedProvider: ProviderKind | null;
   providers?: ReadonlyArray<ServerProvider>;
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
+  acpAgents?: ReadonlyArray<Pick<AcpAgentServer, "id" | "name" | "enabled" | "iconUrl">>;
+  activeAcpAgentId?: string | null;
   activeProviderIconClassName?: string;
   compact?: boolean;
   disabled?: boolean;
@@ -63,15 +128,22 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   triggerClassName?: string;
   disabledReason?: string;
   onProviderModelChange: (provider: ProviderKind, model: string) => void;
+  onAcpAgentSelect?: (agentServerId: string) => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const activeProvider = props.lockedProvider ?? props.provider;
   const selectedProviderOptions = props.modelOptionsByProvider[activeProvider];
   const selectedModelValue =
-    resolveSelectableModel(activeProvider, props.model, selectedProviderOptions) ?? props.model;
+    activeProvider === "acp"
+      ? (props.activeAcpAgentId ?? props.model)
+      : (resolveSelectableModel(activeProvider, props.model, selectedProviderOptions) ??
+        props.model);
+  const selectedAcpAgent = props.acpAgents?.find((agent) => agent.id === props.activeAcpAgentId);
   const selectedModelLabel =
-    selectedProviderOptions.find((option) => option.slug === selectedModelValue)?.name ??
-    props.model;
+    activeProvider === "acp"
+      ? (selectedAcpAgent?.name ?? "ACP Agent")
+      : (selectedProviderOptions.find((option) => option.slug === selectedModelValue)?.name ??
+        props.model);
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[activeProvider];
   const handleModelChange = (provider: ProviderKind, value: string) => {
     if (props.disabled) return;
@@ -81,6 +153,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       resolveModelSlugForProvider(provider, value);
     if (!resolvedModel) return;
     props.onProviderModelChange(provider, resolvedModel);
+    setIsMenuOpen(false);
+  };
+  const handleAcpAgentChange = (agentServerId: string) => {
+    if (props.disabled || !props.onAcpAgentSelect) return;
+    props.onAcpAgentSelect(agentServerId);
     setIsMenuOpen(false);
   };
 
@@ -116,36 +193,64 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             props.compact ? "max-w-36" : undefined,
           )}
         >
-          <ProviderIcon
-            aria-hidden="true"
-            className={cn(
-              "size-4 shrink-0",
-              providerIconClassName(activeProvider, "text-muted-foreground/70"),
-              props.activeProviderIconClassName,
-            )}
-          />
+          {activeProvider === "acp" ? (
+            <AcpAgentIcon
+              iconUrl={selectedAcpAgent?.iconUrl}
+              className={props.activeProviderIconClassName}
+            />
+          ) : (
+            <ProviderIcon
+              aria-hidden="true"
+              className={cn(
+                "size-4 shrink-0",
+                providerIconClassName(activeProvider, "text-muted-foreground/70"),
+                props.activeProviderIconClassName,
+              )}
+            />
+          )}
           <span className="min-w-0 flex-1 truncate">{selectedModelLabel}</span>
           <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
         </span>
       </MenuTrigger>
       <MenuPopup align="start">
         {props.lockedProvider !== null ? (
-          <MenuGroup>
-            <MenuRadioGroup
-              value={selectedModelValue}
-              onValueChange={(value) => handleModelChange(props.lockedProvider!, value)}
-            >
-              {props.modelOptionsByProvider[props.lockedProvider].map((modelOption) => (
-                <MenuRadioItem
-                  key={`${props.lockedProvider}:${modelOption.slug}`}
-                  value={modelOption.slug}
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  {modelOption.name}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          </MenuGroup>
+          props.lockedProvider === "acp" ? (
+            <MenuGroup>
+              <MenuRadioGroup
+                value={props.activeAcpAgentId ?? ""}
+                onValueChange={handleAcpAgentChange}
+              >
+                {(props.acpAgents ?? [])
+                  .filter((agent) => agent.enabled)
+                  .map((agent) => (
+                    <MenuRadioItem
+                      key={agent.id}
+                      value={agent.id}
+                      onClick={() => setIsMenuOpen(false)}
+                    >
+                      <AcpAgentLabel name={agent.name} iconUrl={agent.iconUrl} />
+                    </MenuRadioItem>
+                  ))}
+              </MenuRadioGroup>
+            </MenuGroup>
+          ) : (
+            <MenuGroup>
+              <MenuRadioGroup
+                value={selectedModelValue}
+                onValueChange={(value) => handleModelChange(props.lockedProvider!, value)}
+              >
+                {props.modelOptionsByProvider[props.lockedProvider].map((modelOption) => (
+                  <MenuRadioItem
+                    key={`${props.lockedProvider}:${modelOption.slug}`}
+                    value={modelOption.slug}
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    {modelOption.name}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </MenuGroup>
+          )
         ) : (
           <>
             {AVAILABLE_PROVIDER_OPTIONS.map((option) => {
@@ -216,6 +321,39 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 </MenuSub>
               );
             })}
+            {(props.acpAgents?.some((agent) => agent.enabled) ?? false) && <MenuDivider />}
+            <MenuSub>
+              <MenuSubTrigger>
+                <OpenCodeIcon
+                  aria-hidden="true"
+                  className={cn(
+                    "size-4 shrink-0",
+                    providerIconClassName("acp", "text-muted-foreground/85"),
+                  )}
+                />
+                ACP Agents
+              </MenuSubTrigger>
+              <MenuSubPopup className="[--available-height:min(24rem,70vh)]" sideOffset={4}>
+                <MenuGroup>
+                  <MenuRadioGroup
+                    value={props.activeAcpAgentId ?? ""}
+                    onValueChange={handleAcpAgentChange}
+                  >
+                    {(props.acpAgents ?? [])
+                      .filter((agent) => agent.enabled)
+                      .map((agent) => (
+                        <MenuRadioItem
+                          key={agent.id}
+                          value={agent.id}
+                          onClick={() => setIsMenuOpen(false)}
+                        >
+                          <AcpAgentLabel name={agent.name} iconUrl={agent.iconUrl} />
+                        </MenuRadioItem>
+                      ))}
+                  </MenuRadioGroup>
+                </MenuGroup>
+              </MenuSubPopup>
+            </MenuSub>
             {UNAVAILABLE_PROVIDER_OPTIONS.length > 0 && <MenuDivider />}
             {UNAVAILABLE_PROVIDER_OPTIONS.map((option) => {
               const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];

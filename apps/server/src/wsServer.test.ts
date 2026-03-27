@@ -48,6 +48,14 @@ import { makeSqlitePersistenceLive, SqlitePersistenceMemory } from "./persistenc
 import { SqlClient, SqlError } from "effect/unstable/sql";
 import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService";
 import { ProviderRegistry, type ProviderRegistryShape } from "./provider/Services/ProviderRegistry";
+import {
+  AcpAgentRegistry,
+  type AcpAgentRegistryShape,
+} from "./provider/Services/AcpAgentRegistry.ts";
+import {
+  AcpRegistryClient,
+  type AcpRegistryClientShape,
+} from "./provider/Services/AcpRegistryClient.ts";
 import { Open, type OpenShape } from "./open";
 import { GitManager, type GitManagerShape } from "./git/Services/GitManager.ts";
 import type { GitCoreShape } from "./git/Services/GitCore.ts";
@@ -65,6 +73,18 @@ const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 const defaultOpenService: OpenShape = {
   openBrowser: () => Effect.void,
   openInEditor: () => Effect.void,
+};
+
+const defaultAcpAgentRegistryService: AcpAgentRegistryShape = {
+  listStatuses: Effect.succeed([]),
+  getAgentServers: Effect.succeed([]),
+};
+
+const defaultAcpRegistryClientService: AcpRegistryClientShape = {
+  listAgents: Effect.succeed({
+    registryVersion: "1.0.0",
+    agents: [],
+  }),
 };
 
 const defaultProviderStatuses: ReadonlyArray<ServerProvider> = [
@@ -555,6 +575,8 @@ describe("WebSocket Server", () => {
     const dependenciesLayer = Layer.empty.pipe(
       Layer.provideMerge(runtimeLayer),
       Layer.provideMerge(providerRegistryLayer),
+      Layer.provideMerge(Layer.succeed(AcpAgentRegistry, defaultAcpAgentRegistryService)),
+      Layer.provideMerge(Layer.succeed(AcpRegistryClient, defaultAcpRegistryClientService)),
       Layer.provideMerge(openLayer),
       Layer.provideMerge(ServerSettingsService.layerTest(options.serverSettings)),
       Layer.provideMerge(serverConfigLayer),
@@ -869,6 +891,7 @@ describe("WebSocket Server", () => {
       keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
       issues: [],
       providers: defaultProviderStatuses,
+      acpAgentServers: [],
       availableEditors: expect.any(Array),
       settings: defaultServerSettings,
     });
@@ -895,6 +918,7 @@ describe("WebSocket Server", () => {
       keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
       issues: [],
       providers: defaultProviderStatuses,
+      acpAgentServers: [],
       availableEditors: expect.any(Array),
       settings: defaultServerSettings,
     });
@@ -932,6 +956,7 @@ describe("WebSocket Server", () => {
         },
       ],
       providers: defaultProviderStatuses,
+      acpAgentServers: [],
       availableEditors: expect.any(Array),
       settings: defaultServerSettings,
     });
@@ -1082,6 +1107,7 @@ describe("WebSocket Server", () => {
       keybindings: compileKeybindings(persistedConfig),
       issues: [],
       providers: defaultProviderStatuses,
+      acpAgentServers: [],
       availableEditors: expect.any(Array),
       settings: defaultServerSettings,
     });
@@ -1131,6 +1157,7 @@ describe("WebSocket Server", () => {
       keybindings: compileKeybindings(persistedConfig),
       issues: [],
       providers: defaultProviderStatuses,
+      acpAgentServers: [],
       availableEditors: expect.any(Array),
       settings: defaultServerSettings,
     });

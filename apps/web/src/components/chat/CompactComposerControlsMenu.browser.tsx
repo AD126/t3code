@@ -8,6 +8,7 @@ import { render } from "vitest-browser-react";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { TraitsMenuContent } from "./TraitsPicker";
 import { useComposerDraftStore } from "../../composerDraftStore";
+import { getModelSelectionOptions } from "../../modelSelection";
 
 async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: string }) {
   const threadId = ThreadId.makeUnsafe("thread-compact-menu");
@@ -27,7 +28,9 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
       [provider]: {
         provider,
         model,
-        ...(props?.modelSelection?.options ? { options: props.modelSelection.options } : {}),
+        ...(getModelSelectionOptions(props?.modelSelection)
+          ? { options: getModelSelectionOptions(props?.modelSelection) }
+          : {}),
       },
     },
     activeProvider: provider,
@@ -42,7 +45,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
   const host = document.createElement("div");
   document.body.append(host);
   const onPromptChange = vi.fn();
-  const providerOptions = props?.modelSelection?.options;
+  const providerOptions = getModelSelectionOptions(props?.modelSelection);
   const models =
     provider === "claudeAgent"
       ? [

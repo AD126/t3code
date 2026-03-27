@@ -400,6 +400,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
                   }
                   return { stdout: "", stderr: "spawn ENOENT", code: 1 };
                 }
+                if (joined === "about") {
+                  return { stdout: "", stderr: "spawn ENOENT", code: 1 };
+                }
                 if (joined === "login status") {
                   return { stdout: "Logged in\n", stderr: "", code: 0 };
                 }

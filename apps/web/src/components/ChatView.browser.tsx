@@ -121,6 +121,7 @@ function createBaseServerConfig(): ServerConfig {
         models: [],
       },
     ],
+    acpAgentServers: [],
     availableEditors: [],
     settings: {
       ...DEFAULT_SERVER_SETTINGS,

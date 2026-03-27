@@ -20,6 +20,8 @@ import { ProviderUnsupportedError } from "./provider/Errors";
 import { makeClaudeAdapterLive } from "./provider/Layers/ClaudeAdapter";
 import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter";
 import { makeCursorAdapterLive } from "./provider/Layers/CursorAdapter";
+import { makeAcpAdapterLive } from "./provider/Layers/AcpAdapter";
+import { AcpAgentRegistryLive } from "./provider/Layers/AcpAgentRegistry";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry";
 import { makeProviderServiceLive } from "./provider/Layers/ProviderService";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory";
@@ -82,10 +84,14 @@ export function makeServerProviderLayer(): Layer.Layer<
     const cursorAdapterLayer = makeCursorAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     );
+    const acpAdapterLayer = makeAcpAdapterLive(
+      nativeEventLogger ? { nativeEventLogger } : undefined,
+    ).pipe(Layer.provide(AcpAgentRegistryLive));
     const adapterRegistryLayer = ProviderAdapterRegistryLive.pipe(
       Layer.provide(codexAdapterLayer),
       Layer.provide(claudeAdapterLayer),
       Layer.provide(cursorAdapterLayer),
+      Layer.provide(acpAdapterLayer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
     return makeProviderServiceLive(

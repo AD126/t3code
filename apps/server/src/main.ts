@@ -23,6 +23,8 @@ import * as SqlitePersistence from "./persistence/Layers/Sqlite";
 import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serverLayers";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
+import { AcpAgentRegistryLive } from "./provider/Layers/AcpAgentRegistry";
+import { AcpRegistryClientLive } from "./provider/acp/AcpRegistryClient";
 import { Server } from "./wsServer";
 import { ServerLoggerLive } from "./serverLogger";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService";
@@ -295,6 +297,8 @@ const LayerLive = (input: CliInput) =>
     Layer.provideMerge(makeServerRuntimeServicesLayer()),
     Layer.provideMerge(makeServerProviderLayer()),
     Layer.provideMerge(ProviderRegistryLive),
+    Layer.provideMerge(AcpAgentRegistryLive),
+    Layer.provideMerge(AcpRegistryClientLive),
     Layer.provideMerge(SqlitePersistence.layerConfig),
     Layer.provideMerge(ServerLoggerLive),
     Layer.provideMerge(AnalyticsServiceLayerLive),

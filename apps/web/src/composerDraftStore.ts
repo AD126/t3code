@@ -273,7 +273,7 @@ export interface EffectiveComposerModelState {
 function providerModelOptionsFromSelection(
   modelSelection: ModelSelection | null | undefined,
 ): ProviderModelOptions | null {
-  if (!modelSelection?.options) {
+  if (modelSelection?.provider === "acp" || !modelSelection?.options) {
     return null;
   }
 
@@ -288,7 +288,7 @@ function modelSelectionByProviderToOptions(
   if (!map) return null;
   const result: Record<string, unknown> = {};
   for (const [provider, selection] of Object.entries(map)) {
-    if (selection?.options) {
+    if (selection?.provider !== "acp" && selection?.options) {
       result[provider] = selection.options;
     }
   }
@@ -410,7 +410,9 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
 }
 
 function normalizeProviderKind(value: unknown): ProviderKind | null {
-  return value === "codex" || value === "claudeAgent" || value === "cursor" ? value : null;
+  return value === "codex" || value === "claudeAgent" || value === "cursor" || value === "acp"
+    ? value
+    : null;
 }
 
 function normalizeProviderModelOptions(
@@ -554,6 +556,17 @@ function normalizeModelSelection(
   if (!model) {
     return null;
   }
+  if (provider === "acp") {
+    const agentServerId = candidate?.agentServerId;
+    if (typeof agentServerId !== "string" || agentServerId.trim().length === 0) {
+      return null;
+    }
+    return {
+      provider,
+      model,
+      agentServerId: agentServerId.trim(),
+    };
+  }
   const modelOptions = normalizeProviderModelOptions(
     candidate?.options ? { [provider]: candidate.options } : legacy?.modelOptions,
     provider,
@@ -576,6 +589,9 @@ function legacySyncModelSelectionOptions(
   if (modelSelection === null) {
     return null;
   }
+  if (modelSelection.provider === "acp") {
+    return modelSelection;
+  }
   const options = modelOptions?.[modelSelection.provider];
   return {
     provider: modelSelection.provider,
@@ -588,7 +604,7 @@ function legacyMergeModelSelectionIntoProviderModelOptions(
   modelSelection: ModelSelection | null,
   currentModelOptions: ProviderModelOptions | null | undefined,
 ): ProviderModelOptions | null {
-  if (modelSelection?.options === undefined) {
+  if (modelSelection?.provider === "acp" || modelSelection?.options === undefined) {
     return normalizeProviderModelOptions(currentModelOptions);
   }
   return legacyReplaceProviderModelOptions(
@@ -657,6 +673,23 @@ export function deriveEffectiveComposerModelState(input: {
   projectModelSelection: ModelSelection | null | undefined;
   settings: UnifiedSettings;
 }): EffectiveComposerModelState {
+  if (input.selectedProvider === "acp") {
+    const activeSelection = input.draft?.modelSelectionByProvider?.acp;
+    const selectedAgentServerId =
+      (activeSelection?.provider === "acp" ? activeSelection.agentServerId : undefined) ??
+      (input.threadModelSelection?.provider === "acp"
+        ? input.threadModelSelection.agentServerId
+        : undefined) ??
+      (input.projectModelSelection?.provider === "acp"
+        ? input.projectModelSelection.agentServerId
+        : undefined) ??
+      input.settings.providers.acp.agentServers.find((agent) => agent.enabled)?.id ??
+      "default";
+    return {
+      selectedModel: selectedAgentServerId,
+      modelOptions: null,
+    };
+  }
   const baseModel =
     normalizeModelSlug(
       input.threadModelSelection?.model ?? input.projectModelSelection?.model,
@@ -1662,7 +1695,9 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           const nextMap = { ...base.modelSelectionByProvider };
           if (normalized) {
             const current = nextMap[normalized.provider];
-            if (normalized.options !== undefined) {
+            if (normalized.provider === "acp") {
+              nextMap[normalized.provider] = normalized;
+            } else if (normalized.options !== undefined) {
               // Explicit options provided → use them
               nextMap[normalized.provider] = normalized;
             } else {
@@ -1670,7 +1705,9 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
               nextMap[normalized.provider] = {
                 provider: normalized.provider,
                 model: normalized.model,
-                ...(current?.options ? { options: current.options } : {}),
+                ...(current?.provider !== "acp" && current?.options
+                  ? { options: current.options }
+                  : {}),
               };
             }
           }
@@ -1717,8 +1754,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
                 provider,
                 model: current?.model ?? DEFAULT_MODEL_BY_PROVIDER[provider],
                 options: opts,
-              };
-            } else if (current?.options) {
+              } as ModelSelection;
+            } else if (current?.provider !== "acp" && current?.options) {
               // Remove options but keep the selection
               const { options: _, ...rest } = current;
               nextMap[provider] = rest as ModelSelection;
@@ -1767,8 +1804,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
               provider: normalizedProvider,
               model: currentForProvider?.model ?? DEFAULT_MODEL_BY_PROVIDER[normalizedProvider],
               options: providerOpts,
-            };
-          } else if (currentForProvider?.options) {
+            } as ModelSelection;
+          } else if (currentForProvider?.provider !== "acp" && currentForProvider?.options) {
             const { options: _, ...rest } = currentForProvider;
             nextMap[normalizedProvider] = rest as ModelSelection;
           }
@@ -1790,8 +1827,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
                 ...stickyBase,
                 provider: normalizedProvider,
                 options: providerOpts,
-              };
-            } else if (stickyBase.options) {
+              } as ModelSelection;
+            } else if (stickyBase.provider !== "acp" && stickyBase.options) {
               const { options: _, ...rest } = stickyBase;
               nextStickyMap[normalizedProvider] = rest as ModelSelection;
             }

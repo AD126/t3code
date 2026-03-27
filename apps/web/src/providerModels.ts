@@ -62,6 +62,9 @@ export function getProviderModelCapabilities(
   model: string | null | undefined,
   provider: ProviderKind,
 ): ModelCapabilities {
+  if (provider === "acp") {
+    return EMPTY_CAPABILITIES;
+  }
   const slug = normalizeModelSlug(model, provider);
   return models.find((candidate) => candidate.slug === slug)?.capabilities ?? EMPTY_CAPABILITIES;
 }

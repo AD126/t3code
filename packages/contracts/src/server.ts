@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { ServerAcpAgentStatus } from "./acp";
 import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
@@ -64,6 +65,7 @@ export const ServerConfig = Schema.Struct({
   keybindings: ResolvedKeybindingsConfig,
   issues: ServerConfigIssues,
   providers: ServerProviders,
+  acpAgentServers: Schema.Array(ServerAcpAgentStatus),
   availableEditors: Schema.Array(EditorId),
   settings: ServerSettings,
 });

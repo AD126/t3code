@@ -4,6 +4,8 @@ import { assertFailure } from "@effect/vitest/utils";
 
 import { Effect, Layer, Stream } from "effect";
 
+import { ServerSettingsService } from "../../serverSettings.ts";
+import { AcpAdapter, type AcpAdapterShape } from "../Services/AcpAdapter.ts";
 import { ClaudeAdapter, ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { CodexAdapter, CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { CursorAdapter, CursorAdapterShape } from "../Services/CursorAdapter.ts";
@@ -63,6 +65,23 @@ const fakeCursorAdapter: CursorAdapterShape = {
   streamEvents: Stream.empty,
 };
 
+const fakeAcpAdapter: AcpAdapterShape = {
+  provider: "acp",
+  capabilities: { sessionModelSwitch: "unsupported" },
+  startSession: vi.fn(),
+  sendTurn: vi.fn(),
+  interruptTurn: vi.fn(),
+  respondToRequest: vi.fn(),
+  respondToUserInput: vi.fn(),
+  stopSession: vi.fn(),
+  listSessions: vi.fn(),
+  hasSession: vi.fn(),
+  readThread: vi.fn(),
+  rollbackThread: vi.fn(),
+  stopAll: vi.fn(),
+  streamEvents: Stream.empty,
+};
+
 const layer = it.layer(
   Layer.mergeAll(
     Layer.provide(
@@ -71,6 +90,8 @@ const layer = it.layer(
         Layer.succeed(CodexAdapter, fakeCodexAdapter),
         Layer.succeed(ClaudeAdapter, fakeClaudeAdapter),
         Layer.succeed(CursorAdapter, fakeCursorAdapter),
+        Layer.succeed(AcpAdapter, fakeAcpAdapter),
+        ServerSettingsService.layerTest(),
       ),
     ),
     NodeServices.layer,
@@ -89,7 +110,7 @@ layer("ProviderAdapterRegistryLive", (it) => {
       assert.equal(cursor, fakeCursorAdapter);
 
       const providers = yield* registry.listProviders();
-      assert.deepEqual(providers, ["codex", "claudeAgent", "cursor"]);
+      assert.deepEqual(providers, ["codex", "claudeAgent", "cursor", "acp"]);
     }),
   );
 

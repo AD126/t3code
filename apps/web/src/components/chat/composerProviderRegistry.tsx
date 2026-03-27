@@ -76,6 +76,7 @@ function getProviderStateFromCapabilities(
     codex: normalizeCodexModelOptionsWithCapabilities(caps, providerOptions),
     cursor: normalizeCursorModelOptionsWithCapabilities(caps, providerOptions),
     claudeAgent: normalizeClaudeModelOptionsWithCapabilities(caps, providerOptions),
+    acp: undefined,
   }[provider];
 
   // Ultrathink styling (driven by capabilities data, not provider identity)
@@ -211,6 +212,15 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
           onPromptChange={onPromptChange}
         />
       ) : null,
+  },
+  acp: {
+    getState: (input) => ({
+      provider: input.provider,
+      promptEffort: null,
+      modelOptionsForDispatch: undefined,
+    }),
+    renderTraitsMenuContent: () => null,
+    renderTraitsPicker: () => null,
   },
 };
 

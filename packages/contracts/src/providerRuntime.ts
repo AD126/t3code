@@ -1,4 +1,5 @@
 import { Option, Schema } from "effect";
+import { AcpAgentServerId } from "./acp";
 import {
   EventId,
   IsoDateTime,
@@ -245,6 +246,7 @@ const RuntimeErrorType = Schema.Literal("runtime.error");
 const ProviderRuntimeEventBase = Schema.Struct({
   eventId: EventId,
   provider: ProviderKind,
+  agentServerId: Schema.optional(AcpAgentServerId),
   threadId: ThreadId,
   createdAt: IsoDateTime,
   turnId: Schema.optional(TurnId),

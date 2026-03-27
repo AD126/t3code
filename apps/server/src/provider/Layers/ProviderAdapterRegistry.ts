@@ -11,6 +11,7 @@ import { Effect, Layer } from "effect";
 
 import { ProviderUnsupportedError, type ProviderAdapterError } from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
+import { AcpAdapter } from "../Services/AcpAdapter.ts";
 import {
   ProviderAdapterRegistry,
   type ProviderAdapterRegistryShape,
@@ -28,7 +29,7 @@ const makeProviderAdapterRegistry = (options?: ProviderAdapterRegistryLiveOption
     const adapters =
       options?.adapters !== undefined
         ? options.adapters
-        : [yield* CodexAdapter, yield* ClaudeAdapter, yield* CursorAdapter];
+        : [yield* CodexAdapter, yield* ClaudeAdapter, yield* CursorAdapter, yield* AcpAdapter];
     const byProvider = new Map(adapters.map((adapter) => [adapter.provider, adapter]));
 
     const getByProvider: ProviderAdapterRegistryShape["getByProvider"] = (provider) => {

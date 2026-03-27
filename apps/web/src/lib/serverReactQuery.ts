@@ -4,6 +4,7 @@ import { ensureNativeApi } from "~/nativeApi";
 export const serverQueryKeys = {
   all: ["server"] as const,
   config: () => ["server", "config"] as const,
+  acpRegistry: () => ["server", "acp-registry"] as const,
 };
 
 /**
@@ -19,6 +20,16 @@ export function serverConfigQueryOptions() {
     queryFn: async () => {
       const api = ensureNativeApi();
       return api.server.getConfig();
+    },
+  });
+}
+
+export function serverAcpRegistryQueryOptions() {
+  return queryOptions({
+    queryKey: serverQueryKeys.acpRegistry(),
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      return api.server.listAcpRegistry();
     },
   });
 }
