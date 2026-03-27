@@ -1,14 +1,25 @@
 import { createInterface } from "node:readline";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
-import { Cause, Deferred, Effect, Exit, Queue, Ref, Scope, Semaphore, Stream } from "effect";
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  Queue,
+  Ref,
+  Schema,
+  Scope,
+  Semaphore,
+  Stream,
+} from "effect";
 
 import {
+  AcpError,
   AcpParseError,
   AcpProcessExitedError,
   AcpRpcError,
   AcpSpawnError,
-  type AcpError,
 } from "./AcpErrors.ts";
 import {
   decodeAcpInboundFromJsonLine,
@@ -43,24 +54,21 @@ export interface AcpJsonRpcConnection {
 export function spawnAcpChildProcess(
   input: AcpSpawnInput,
 ): Effect.Effect<ChildProcessWithoutNullStreams, AcpSpawnError, never> {
+  const shell = process.platform === "win32";
   return Effect.try({
     try: () => {
       const c = spawn(input.command, [...input.args], {
         cwd: input.cwd,
         env: { ...process.env, ...input.env },
         stdio: ["pipe", "pipe", "inherit"],
-        shell: process.platform === "win32",
+        shell,
       });
       if (!c.stdin || !c.stdout) {
         throw new Error("Child process missing stdio pipes.");
       }
       return c as unknown as ChildProcessWithoutNullStreams;
     },
-    catch: (cause) =>
-      new AcpSpawnError({
-        message: cause instanceof Error ? cause.message : String(cause),
-        cause,
-      }),
+    catch: (cause) => new AcpSpawnError({ command: input.command, args: input.args, shell, cause }),
   });
 }
 
@@ -109,7 +117,6 @@ export const attachAcpJsonRpcConnection = (
         },
         catch: (cause) =>
           new AcpSpawnError({
-            message: cause instanceof Error ? cause.message : String(cause),
             cause,
           }),
       });
@@ -176,7 +183,6 @@ export const attachAcpJsonRpcConnection = (
               def,
               new AcpRpcError({
                 code: msg.error.code,
-                message: msg.error.message,
                 ...(msg.error.data !== undefined ? { data: msg.error.data } : {}),
               }),
             );
@@ -203,7 +209,7 @@ export const attachAcpJsonRpcConnection = (
           yield* respondResult(msg.id, exit.value);
         } else {
           const left = Cause.squash(exit.cause);
-          yield* respondError(msg.id, left instanceof AcpRpcError ? left.message : String(left));
+          yield* respondError(msg.id, Schema.is(AcpError)(left) ? left.message : String(left));
         }
       });
 

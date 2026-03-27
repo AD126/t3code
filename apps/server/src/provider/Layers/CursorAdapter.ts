@@ -33,6 +33,7 @@ import {
   Layer,
   Queue,
   Random,
+  Schema,
   Stream,
 } from "effect";
 
@@ -106,14 +107,14 @@ function mapAcpToAdapterError(
   method: string,
   error: AcpError,
 ): ProviderAdapterError {
-  if (error instanceof AcpProcessExitedError) {
+  if (Schema.is(AcpProcessExitedError)(error)) {
     return new ProviderAdapterSessionClosedError({
       provider: PROVIDER,
       threadId,
       cause: error,
     });
   }
-  if (error instanceof AcpRpcError) {
+  if (Schema.is(AcpRpcError)(error)) {
     return new ProviderAdapterRequestError({
       provider: PROVIDER,
       method,
@@ -535,7 +536,7 @@ function updateSessionModeState(
 
 function isMethodNotFoundRpcError(error: AcpError): boolean {
   return (
-    error instanceof AcpRpcError &&
+    Schema.is(AcpRpcError)(error) &&
     (error.code === -32601 || error.message.toLowerCase().includes("method not found"))
   );
 }
