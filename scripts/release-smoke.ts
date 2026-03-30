@@ -114,21 +114,18 @@ try {
     "Expected bun.lock to contain the smoke version.",
   );
 
-  const latestSchemaPath = resolve(
-    tempRoot,
-    "apps/marketing/public/schemas/server-settings.schema.json",
-  );
+  const latestSchemaPath = resolve(tempRoot, "apps/marketing/public/schemas/settings.json");
   const versionedSchemaPath = resolve(
     tempRoot,
-    "apps/marketing/public/schemas/server-settings/9.9.9-smoke.0.schema.json",
+    "apps/marketing/public/schemas/settings/9.9.9-smoke.0.json",
   );
   const latestKeybindingsSchemaPath = resolve(
     tempRoot,
-    "apps/marketing/public/schemas/keybindings.schema.json",
+    "apps/marketing/public/schemas/keybindings.json",
   );
   const versionedKeybindingsSchemaPath = resolve(
     tempRoot,
-    "apps/marketing/public/schemas/keybindings/9.9.9-smoke.0.schema.json",
+    "apps/marketing/public/schemas/keybindings/9.9.9-smoke.0.json",
   );
   if (!existsSync(latestSchemaPath)) {
     throw new Error(

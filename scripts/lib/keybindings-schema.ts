@@ -6,13 +6,12 @@ import {
   writeJsonSchemaArtifacts,
 } from "./json-schema";
 
-export const KEYBINDINGS_SCHEMA_RELATIVE_PATH =
-  "apps/marketing/public/schemas/keybindings.schema.json";
+export const KEYBINDINGS_SCHEMA_RELATIVE_PATH = "apps/marketing/public/schemas/keybindings.json";
 export const KEYBINDINGS_VERSIONED_SCHEMA_DIRECTORY_RELATIVE_PATH =
   "apps/marketing/public/schemas/keybindings";
 
 export const getVersionedKeybindingsSchemaRelativePath = (version: string) =>
-  `${KEYBINDINGS_VERSIONED_SCHEMA_DIRECTORY_RELATIVE_PATH}/${version}.schema.json`;
+  `${KEYBINDINGS_VERSIONED_SCHEMA_DIRECTORY_RELATIVE_PATH}/${version}.json`;
 
 export function buildKeybindingsJsonSchema(): Record<string, unknown> {
   const schema = buildJsonSchemaDocument(KeybindingsConfig, {

@@ -35,8 +35,14 @@ describe("updateReleasePackageVersions", () => {
 
       expect(
         JSON.parse(
+          readFileSync(resolve(rootDir, "apps/marketing/public/schemas/settings.json"), "utf8"),
+        ),
+      ).toMatchObject({ title: "T3 Code Server Settings" });
+
+      expect(
+        JSON.parse(
           readFileSync(
-            resolve(rootDir, "apps/marketing/public/schemas/server-settings.schema.json"),
+            resolve(rootDir, "apps/marketing/public/schemas/settings/1.2.3.json"),
             "utf8",
           ),
         ),
@@ -44,26 +50,14 @@ describe("updateReleasePackageVersions", () => {
 
       expect(
         JSON.parse(
-          readFileSync(
-            resolve(rootDir, "apps/marketing/public/schemas/server-settings/1.2.3.schema.json"),
-            "utf8",
-          ),
-        ),
-      ).toMatchObject({ title: "T3 Code Server Settings" });
-
-      expect(
-        JSON.parse(
-          readFileSync(
-            resolve(rootDir, "apps/marketing/public/schemas/keybindings.schema.json"),
-            "utf8",
-          ),
+          readFileSync(resolve(rootDir, "apps/marketing/public/schemas/keybindings.json"), "utf8"),
         ),
       ).toMatchObject({ title: "T3 Code Keybindings" });
 
       expect(
         JSON.parse(
           readFileSync(
-            resolve(rootDir, "apps/marketing/public/schemas/keybindings/1.2.3.schema.json"),
+            resolve(rootDir, "apps/marketing/public/schemas/keybindings/1.2.3.json"),
             "utf8",
           ),
         ),

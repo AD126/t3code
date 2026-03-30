@@ -26,7 +26,7 @@ To get autocomplete and hover docs in editors like VS Code, associate the file e
   "json.schemas": [
     {
       "fileMatch": ["**/.t3/keybindings.json", "**/keybindings.json"],
-      "url": "https://t3.chat/schemas/keybindings.schema.json"
+      "url": "https://t3.codes/schemas/keybindings.json"
     }
   ]
 }
@@ -35,7 +35,7 @@ To get autocomplete and hover docs in editors like VS Code, associate the file e
 If you want a pinned schema instead of the latest stable one, use a versioned URL such as:
 
 ```text
-https://t3.chat/schemas/keybindings/0.0.15.schema.json
+https://t3.codes/schemas/keybindings/0.0.15.json
 ```
 
 ## Defaults

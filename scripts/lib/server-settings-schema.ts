@@ -8,13 +8,12 @@ import {
   writeJsonSchemaArtifacts,
 } from "./json-schema";
 
-export const SERVER_SETTINGS_SCHEMA_RELATIVE_PATH =
-  "apps/marketing/public/schemas/server-settings.schema.json";
+export const SERVER_SETTINGS_SCHEMA_RELATIVE_PATH = "apps/marketing/public/schemas/settings.json";
 export const SERVER_SETTINGS_VERSIONED_SCHEMA_DIRECTORY_RELATIVE_PATH =
-  "apps/marketing/public/schemas/server-settings";
+  "apps/marketing/public/schemas/settings";
 
 export const getVersionedServerSettingsSchemaRelativePath = (version: string) =>
-  `${SERVER_SETTINGS_VERSIONED_SCHEMA_DIRECTORY_RELATIVE_PATH}/${version}.schema.json`;
+  `${SERVER_SETTINGS_VERSIONED_SCHEMA_DIRECTORY_RELATIVE_PATH}/${version}.json`;
 
 export function buildServerSettingsJsonSchema(): Record<string, unknown> {
   const schema = buildJsonSchemaDocument(ServerSettings, {

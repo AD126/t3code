@@ -226,7 +226,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         serverConfig.settingsPath,
         `${JSON.stringify(
           {
-            $schema: "https://t3.chat/schemas/server-settings/0.0.15.schema.json",
+            $schema: "https://t3.codes/schemas/settings/0.0.15.json",
             providers: {
               codex: {
                 binaryPath: "/usr/local/bin/codex",
@@ -250,7 +250,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
       assert.deepEqual(JSON.parse(raw), {
-        $schema: "https://t3.chat/schemas/server-settings/0.0.15.schema.json",
+        $schema: "https://t3.codes/schemas/settings/0.0.15.json",
         providers: {
           codex: {
             binaryPath: "/usr/local/bin/codex",
