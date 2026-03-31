@@ -29,66 +29,6 @@ export function buildJsonSchemaDocument(
   };
 }
 
-export const asJsonSchemaRecord = (value: unknown): Record<string, unknown> | null =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-
-export const getJsonSchemaProperty = (
-  schema: Record<string, unknown>,
-  propertyName: string,
-): Record<string, unknown> | null => {
-  const properties = asJsonSchemaRecord(schema.properties);
-  return properties ? asJsonSchemaRecord(properties[propertyName]) : null;
-};
-
-export const getNullableJsonSchemaBranch = (
-  schema: Record<string, unknown> | null,
-): Record<string, unknown> | null => {
-  if (!schema) {
-    return null;
-  }
-
-  const anyOf = Array.isArray(schema.anyOf) ? schema.anyOf : null;
-  if (!anyOf) {
-    return schema;
-  }
-
-  for (const entry of anyOf) {
-    const branch = asJsonSchemaRecord(entry);
-    if (!branch || branch.type === "null") {
-      continue;
-    }
-    return branch;
-  }
-
-  return null;
-};
-
-export const getJsonSchemaAnyOfBranches = (
-  schema: Record<string, unknown> | null,
-): ReadonlyArray<Record<string, unknown>> => {
-  if (!schema || !Array.isArray(schema.anyOf)) {
-    return [];
-  }
-
-  return schema.anyOf
-    .map(asJsonSchemaRecord)
-    .filter(
-      (branch): branch is Record<string, unknown> => branch !== null && branch.type !== "null",
-    );
-};
-
-export const setJsonSchemaDescription = (
-  schema: Record<string, unknown> | null,
-  description: string,
-): void => {
-  if (!schema) {
-    return;
-  }
-  schema.description = description;
-};
-
 function writeJsonFileIfChanged(filePath: string, document: Record<string, unknown>): boolean {
   const nextContent = `${JSON.stringify(document, null, 2)}\n`;
   const previousContent = (() => {
