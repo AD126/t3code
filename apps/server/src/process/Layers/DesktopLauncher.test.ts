@@ -28,6 +28,7 @@ interface SpawnCall {
   readonly args: ReadonlyArray<string>;
   readonly detached?: boolean | undefined;
   readonly shell?: boolean | string | undefined;
+  readonly windowsVerbatimArguments?: boolean | undefined;
   readonly stdin?: unknown;
   readonly stdout?: unknown;
   readonly stderr?: unknown;
@@ -152,6 +153,7 @@ function spawnHarness(
         args: [...input.args],
         detached: input.detached,
         shell: input.shell,
+        windowsVerbatimArguments: input.windowsVerbatimArguments,
         stdin: input.stdin,
         stdout: input.stdout,
         stderr: input.stderr,
@@ -336,12 +338,23 @@ it.effect("openInEditor launches Windows batch shims through cmd.exe without she
     });
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0]?.command, "cmd.exe");
-    assert.deepEqual(calls[0]?.args.slice(0, 4), ["/d", "/v:off", "/s", "/c"]);
-    assert.equal(calls[0]?.args[4]?.toLowerCase().includes(`${dir}/code.cmd`.toLowerCase()), true);
-    assert.equal(calls[0]?.args[4]?.includes('"--goto"'), true);
-    assert.equal(calls[0]?.args[4]?.includes("100%% real"), true);
+    assert.equal(calls[0]?.command.toLowerCase().includes("powershell"), true);
+    assert.deepEqual(calls[0]?.args.slice(0, 5), [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-EncodedCommand",
+    ]);
+    const encoded = calls[0]?.args[5];
+    assert.isString(encoded);
+    const decoded = decodePowerShellCommand(encoded!);
+    assert.equal(decoded.includes("Start-Process"), true);
+    assert.equal(decoded.toLowerCase().includes(`${dir}/code.cmd`.toLowerCase()), true);
+    assert.equal(decoded.includes("--goto"), true);
+    assert.equal(decoded.includes("100% real"), true);
     assert.equal(calls[0]?.detached, true);
+    assert.equal(calls[0]?.windowsVerbatimArguments, undefined);
     assert.equal(calls[0]?.shell, false);
     assert.equal(calls[0]?.stdin, "ignore");
     assert.equal(calls[0]?.stdout, "ignore");

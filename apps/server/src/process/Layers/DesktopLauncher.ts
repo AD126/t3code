@@ -37,6 +37,7 @@ export interface DetachedSpawnInput {
   readonly args: ReadonlyArray<string>;
   readonly detached?: boolean;
   readonly shell?: boolean;
+  readonly windowsVerbatimArguments?: boolean;
   readonly stdin?: "ignore";
   readonly stdout?: "ignore";
   readonly stderr?: "ignore";
@@ -303,6 +304,23 @@ function makePowerShellPlan(input: OpenExternalInput, powerShellCommand: string)
   );
 }
 
+function makePowerShellStartProcessArgs(
+  commandPath: string,
+  args: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  const argumentList =
+    args.length > 0 ? ` -ArgumentList ${args.map(quotePowerShellValue).join(", ")}` : "";
+  const command = `Start-Process -FilePath ${quotePowerShellValue(commandPath)}${argumentList} -WindowStyle Hidden`;
+  return [
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-EncodedCommand",
+    encodePowerShellCommand(command),
+  ];
+}
+
 function makeLinuxDefaultPlan(input: OpenExternalInput): LaunchPlan {
   const wait = input.wait ?? false;
   return makeLaunchPlan("xdg-open", [input.target], {
@@ -382,7 +400,23 @@ function resolveSpawnInput(
   runtime: LaunchRuntime,
   plan: LaunchPlan,
   resolvedCommand: ResolvedCommand,
+  startProcessLauncher: string | undefined,
 ): DetachedSpawnInput {
+  if (plan.detached && resolvedCommand.usesCmdWrapper && startProcessLauncher !== undefined) {
+    return {
+      command: startProcessLauncher,
+      args: makePowerShellStartProcessArgs(resolvedCommand.path, plan.args),
+      ...(plan.detached !== undefined ? { detached: plan.detached } : {}),
+      ...(plan.shell !== undefined ? { shell: plan.shell } : {}),
+      ...(plan.stdio === "ignore"
+        ? {
+            stdin: "ignore" as const,
+            stdout: "ignore" as const,
+            stderr: "ignore" as const,
+          }
+        : {}),
+    };
+  }
   return {
     command: resolvedCommand.usesCmdWrapper
       ? resolveWindowsCommandShell(runtime.env)
@@ -392,6 +426,7 @@ function resolveSpawnInput(
       : [...plan.args],
     ...(plan.detached !== undefined ? { detached: plan.detached } : {}),
     ...(plan.shell !== undefined ? { shell: plan.shell } : {}),
+    ...(resolvedCommand.usesCmdWrapper ? { windowsVerbatimArguments: true } : {}),
     ...(plan.stdio === "ignore"
       ? {
           stdin: "ignore" as const,
@@ -490,6 +525,9 @@ function defaultSpawnDetached(
       spawnNodeChildProcess(input.command, [...input.args], {
         ...(input.detached !== undefined ? { detached: input.detached } : {}),
         ...(input.shell !== undefined ? { shell: input.shell } : {}),
+        ...(input.windowsVerbatimArguments !== undefined
+          ? { windowsVerbatimArguments: input.windowsVerbatimArguments }
+          : {}),
         ...(input.stdin === "ignore" && input.stdout === "ignore" && input.stderr === "ignore"
           ? { stdio: "ignore" as const }
           : {}),
@@ -645,6 +683,16 @@ export const make = Effect.fn("makeDesktopLauncher")(function* (
   const commandAvailable = (command: string) =>
     resolveCommand(command).pipe(Effect.map(Option.isSome));
 
+  const startProcessLauncher = yield* Effect.gen(function* () {
+    for (const candidate of runtime.powerShellCandidates) {
+      const resolved = yield* resolveCommand(candidate);
+      if (Option.isSome(resolved)) {
+        return resolved.value.path;
+      }
+    }
+    return undefined;
+  });
+
   const fileManagerAvailable = Effect.gen(function* () {
     const candidates =
       runtime.platform === "darwin"
@@ -695,7 +743,7 @@ export const make = Effect.fn("makeDesktopLauncher")(function* (
     resolvedCommand: ResolvedCommand,
     context: LaunchContext,
   ) => {
-    const input = resolveSpawnInput(runtime, plan, resolvedCommand);
+    const input = resolveSpawnInput(runtime, plan, resolvedCommand, startProcessLauncher);
     return spawner
       .spawn(
         ChildProcess.make(input.command, [...input.args], {
@@ -743,7 +791,12 @@ export const make = Effect.fn("makeDesktopLauncher")(function* (
       Scope.make("sequential"),
       (scope) =>
         Effect.gen(function* () {
-          const spawnInput = resolveSpawnInput(runtime, plan, resolvedCommand);
+          const spawnInput = resolveSpawnInput(
+            runtime,
+            plan,
+            resolvedCommand,
+            startProcessLauncher,
+          );
           const handle = yield* spawnPlan(plan, resolvedCommand, context).pipe(
             Scope.provide(scope),
           );
@@ -756,7 +809,8 @@ export const make = Effect.fn("makeDesktopLauncher")(function* (
     plan: LaunchPlan,
     resolvedCommand: ResolvedCommand,
     context: LaunchContext,
-  ) => spawnDetached(resolveSpawnInput(runtime, plan, resolvedCommand), context);
+  ) =>
+    spawnDetached(resolveSpawnInput(runtime, plan, resolvedCommand, startProcessLauncher), context);
 
   const runPlan = (plan: LaunchPlan, resolvedCommand: ResolvedCommand, context: LaunchContext) =>
     plan.wait
