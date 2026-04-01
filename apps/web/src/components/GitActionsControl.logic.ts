@@ -214,7 +214,7 @@ export function resolveQuickAction(
         label: "Push",
         disabled: false,
         kind: "run_action",
-        action: isDefaultBranch ? "commit_push" : "push",
+        action: "push",
       };
     }
     return {
@@ -248,7 +248,7 @@ export function resolveQuickAction(
         label: "Push",
         disabled: false,
         kind: "run_action",
-        action: isDefaultBranch ? "commit_push" : "push",
+        action: "push",
       };
     }
     return {
