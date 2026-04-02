@@ -831,6 +831,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           gitManager: {
             status: () =>
               Effect.succeed({
+                isRepo: true,
+                hasOriginRemote: true,
+                isDefaultBranch: true,
                 branch: "main",
                 hasWorkingTreeChanges: false,
                 workingTree: { files: [], insertions: 0, deletions: 0 },
@@ -851,6 +854,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   },
                   push: { status: "skipped_not_requested" as const },
                   pr: { status: "skipped_not_requested" as const },
+                  toast: {
+                    title: "Committed abc123",
+                    description: "feat: demo",
+                    cta: {
+                      kind: "run_action" as const,
+                      label: "Push",
+                      action: {
+                        kind: "push" as const,
+                      },
+                    },
+                  },
                 };
 
                 yield* (
@@ -920,6 +934,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 ],
                 isRepo: true,
                 hasOriginRemote: true,
+                nextCursor: null,
+                totalCount: 1,
               }),
             createWorktree: () =>
               Effect.succeed({
