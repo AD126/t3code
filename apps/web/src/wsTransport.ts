@@ -9,6 +9,7 @@ import { RpcClient } from "effect/unstable/rpc";
 
 interface SubscribeOptions {
   readonly retryDelay?: Duration.Input;
+  readonly onResubscribe?: () => void;
 }
 
 interface RequestOptions {
@@ -82,9 +83,21 @@ export class WsTransport {
     }
 
     let active = true;
+    let firstAttempt = true;
     const retryDelayMs = options?.retryDelay ?? DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS;
     const cancel = this.runtime.runCallback(
-      Effect.promise(() => this.clientPromise).pipe(
+      Effect.sync(() => {
+        if (firstAttempt) {
+          firstAttempt = false;
+          return;
+        }
+        try {
+          options?.onResubscribe?.();
+        } catch {
+          // Swallow reconnect hook errors so the stream can recover.
+        }
+      }).pipe(
+        Effect.andThen(Effect.promise(() => this.clientPromise)),
         Effect.flatMap((client) =>
           Stream.runForEach(connect(client), (value) =>
             Effect.sync(() => {

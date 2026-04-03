@@ -250,10 +250,12 @@ describe("WsTransport", () => {
   it("re-subscribes stream listeners after the stream exits", async () => {
     const transport = new WsTransport("ws://localhost:3020");
     const listener = vi.fn();
+    const onResubscribe = vi.fn();
 
     const unsubscribe = transport.subscribe(
       (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
       listener,
+      { onResubscribe },
     );
     await waitFor(() => {
       expect(sockets).toHaveLength(1);
@@ -301,6 +303,7 @@ describe("WsTransport", () => {
         .find((message) => message._tag === "Request" && message.id !== firstRequest.id);
       expect(nextRequest).toBeDefined();
     });
+    expect(onResubscribe).toHaveBeenCalledOnce();
 
     const secondRequest = socket.sent
       .map((message) => JSON.parse(message) as { _tag?: string; id?: string; tag?: string })

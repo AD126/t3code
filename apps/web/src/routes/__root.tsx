@@ -423,8 +423,8 @@ function EventRouter() {
       queueMicrotask(flushPendingDomainEvents);
     };
 
-    const recoverFromSequenceGap = async (): Promise<void> => {
-      if (!recovery.beginReplayRecovery("sequence-gap")) {
+    const runReplayRecovery = async (reason: "sequence-gap" | "resubscribe"): Promise<void> => {
+      if (!recovery.beginReplayRecovery(reason)) {
         return;
       }
 
@@ -441,7 +441,7 @@ function EventRouter() {
       }
 
       if (!disposed && recovery.completeReplayRecovery()) {
-        void recoverFromSequenceGap();
+        void runReplayRecovery(reason);
       }
     };
 
@@ -471,7 +471,7 @@ function EventRouter() {
           syncServerReadModel(snapshot);
           reconcileSnapshotDerivedState();
           if (recovery.completeSnapshotRecovery(snapshot.snapshotSequence)) {
-            void recoverFromSequenceGap();
+            void runReplayRecovery("sequence-gap");
           }
         }
       } catch {
@@ -488,18 +488,29 @@ function EventRouter() {
     const fallbackToSnapshotRecovery = async (): Promise<void> => {
       await runSnapshotRecovery("replay-failed");
     };
-    const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
-      const action = recovery.classifyDomainEvent(event.sequence);
-      if (action === "apply") {
-        pendingDomainEvents.push(event);
-        schedulePendingDomainEventFlush();
-        return;
-      }
-      if (action === "recover") {
-        flushPendingDomainEvents();
-        void recoverFromSequenceGap();
-      }
-    });
+    const unsubDomainEvent = getWsRpcClient().orchestration.onDomainEvent(
+      (event) => {
+        const action = recovery.classifyDomainEvent(event.sequence);
+        if (action === "apply") {
+          pendingDomainEvents.push(event);
+          schedulePendingDomainEventFlush();
+          return;
+        }
+        if (action === "recover") {
+          flushPendingDomainEvents();
+          void runReplayRecovery("sequence-gap");
+        }
+      },
+      {
+        onResubscribe: () => {
+          if (disposed) {
+            return;
+          }
+          flushPendingDomainEvents();
+          void runReplayRecovery("resubscribe");
+        },
+      },
+    );
     const unsubTerminalEvent = api.terminal.onEvent((event) => {
       const thread = useStore.getState().threads.find((entry) => entry.id === event.threadId);
       if (thread && thread.archivedAt !== null) {
