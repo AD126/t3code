@@ -342,6 +342,52 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("does not fire onResubscribe when the first stream attempt exits before any value", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const listener = vi.fn();
+    const onResubscribe = vi.fn();
+
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      listener,
+      { onResubscribe },
+    );
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const socket = getSocket();
+    socket.open();
+
+    await waitFor(() => {
+      expect(socket.sent).toHaveLength(1);
+    });
+
+    const firstRequest = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    socket.serverMessage(
+      JSON.stringify({
+        _tag: "Exit",
+        requestId: firstRequest.id,
+        exit: {
+          _tag: "Success",
+          value: null,
+        },
+      }),
+    );
+
+    await waitFor(() => {
+      const nextRequest = socket.sent
+        .map((message) => JSON.parse(message) as { _tag?: string; id?: string })
+        .find((message) => message._tag === "Request" && message.id !== firstRequest.id);
+      expect(nextRequest).toBeDefined();
+    });
+    expect(onResubscribe).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
   it("streams finite request events without re-subscribing", async () => {
     const transport = new WsTransport("ws://localhost:3020");
     const listener = vi.fn();

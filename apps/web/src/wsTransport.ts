@@ -83,12 +83,11 @@ export class WsTransport {
     }
 
     let active = true;
-    let firstAttempt = true;
+    let hasReceivedValue = false;
     const retryDelayMs = options?.retryDelay ?? DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS;
     const cancel = this.runtime.runCallback(
       Effect.sync(() => {
-        if (firstAttempt) {
-          firstAttempt = false;
+        if (!hasReceivedValue) {
           return;
         }
         try {
@@ -104,6 +103,7 @@ export class WsTransport {
               if (!active) {
                 return;
               }
+              hasReceivedValue = true;
               try {
                 listener(value);
               } catch {
