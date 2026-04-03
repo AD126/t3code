@@ -488,7 +488,7 @@ function EventRouter() {
     const fallbackToSnapshotRecovery = async (): Promise<void> => {
       await runSnapshotRecovery("replay-failed");
     };
-    const unsubDomainEvent = getWsRpcClient().orchestration.onDomainEvent(
+    const unsubDomainEvent = api.orchestration.onDomainEvent(
       (event) => {
         const action = recovery.classifyDomainEvent(event.sequence);
         if (action === "apply") {
