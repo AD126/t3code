@@ -60,7 +60,7 @@ function describeExhaustedToast(): string {
 
 function buildReconnectTitle(status: WsConnectionStatus): string {
   if (status.nextRetryAt === null) {
-    return "Disconnected from T3 Server";
+    return "Reconnecting to T3 Server";
   }
 
   return "Disconnected from T3 Server";
