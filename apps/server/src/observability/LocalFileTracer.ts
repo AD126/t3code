@@ -1,7 +1,7 @@
 import type * as Exit from "effect/Exit";
 import { Effect, Option, Tracer } from "effect";
 
-import { spanToTraceRecord } from "./TraceRecord.ts";
+import { EffectTraceRecord, spanToTraceRecord } from "./TraceRecord.ts";
 import { makeTraceSink, type TraceSink } from "./TraceSink.ts";
 
 export interface LocalFileTracerOptions {
@@ -31,7 +31,7 @@ class LocalFileSpan implements Tracer.Span {
   constructor(
     options: Parameters<Tracer.Tracer["span"]>[0],
     private readonly delegate: Tracer.Span,
-    private readonly push: (record: ReturnType<typeof spanToTraceRecord>) => void,
+    private readonly push: (record: EffectTraceRecord) => void,
   ) {
     this.name = delegate.name;
     this.spanId = delegate.spanId;

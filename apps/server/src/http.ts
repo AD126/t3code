@@ -1,5 +1,6 @@
 import Mime from "@effect/platform-node/Mime";
 import { Effect, FileSystem, Layer, Option, Path } from "effect";
+import { cast } from "effect/Function";
 import {
   HttpBody,
   HttpClient,
@@ -8,6 +9,7 @@ import {
   HttpServerResponse,
   HttpServerRequest,
 } from "effect/unstable/http";
+import { OtlpTracer } from "effect/unstable/observability";
 
 import {
   ATTACHMENTS_ROUTE_PREFIX,
@@ -16,7 +18,7 @@ import {
 } from "./attachmentPaths";
 import { resolveAttachmentPathById } from "./attachmentStore";
 import { ServerConfig } from "./config";
-import { decodeOtlpTraceRecords, OtlpTracePayloadSchema } from "./observability/TraceRecord.ts";
+import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver";
 
@@ -28,32 +30,22 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
   "POST",
   OTLP_TRACES_PROXY_PATH,
   Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
     const config = yield* ServerConfig;
     const otlpTracesUrl = config.otlpTracesUrl;
     const browserTraceCollector = yield* BrowserTraceCollector;
     const httpClient = yield* HttpClient.HttpClient;
+    const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
 
-    // Get raw body
-    const body = yield* Effect.service(HttpServerRequest.HttpServerRequest).pipe(
-      Effect.flatMap((request) => request.arrayBuffer),
-      Effect.map((buffer) => new Uint8Array(buffer)),
-    );
-
-    // Collect traces to local trace sink
-    yield* HttpServerRequest.schemaBodyJson(OtlpTracePayloadSchema).pipe(
-      Effect.map(decodeOtlpTraceRecords),
-      Effect.flatMap(browserTraceCollector.record),
-      Effect.catch((cause) => Effect.logWarning("Failed to record browser OTLP traces", { cause })),
-    );
+    yield* browserTraceCollector.record(decodeOtlpTraceRecords(bodyJson));
 
     if (otlpTracesUrl === undefined) {
       return HttpServerResponse.empty({ status: 204 });
     }
 
-    // Forward request to remote OTLP traces endpoint
     return yield* httpClient
       .post(otlpTracesUrl, {
-        body: HttpBody.uint8Array(body),
+        body: HttpBody.jsonUnsafe(bodyJson),
       })
       .pipe(
         Effect.flatMap(HttpClientResponse.filterStatusOk),

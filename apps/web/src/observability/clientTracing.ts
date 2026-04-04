@@ -1,5 +1,5 @@
 import { Exit, Layer, ManagedRuntime, Scope, Tracer } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 
 import { isElectron } from "../env";
@@ -16,7 +16,11 @@ const CLIENT_TRACING_RESOURCE = {
   },
 } as const;
 
-const delegateRuntimeLayer = Layer.mergeAll(FetchHttpClient.layer, OtlpSerialization.layerJson);
+const delegateRuntimeLayer = Layer.mergeAll(
+  FetchHttpClient.layer,
+  OtlpSerialization.layerJson,
+  Layer.succeed(HttpClient.TracerDisabledWhen, () => true),
+);
 
 let activeDelegate: Tracer.Tracer | null = null;
 let activeRuntime: ManagedRuntime.ManagedRuntime<never, never> | null = null;

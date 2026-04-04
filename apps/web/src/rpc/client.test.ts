@@ -2,7 +2,10 @@ import { DEFAULT_SERVER_SETTINGS, WS_METHODS } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AsyncResult, AtomRegistry } from "effect/unstable/reactivity";
 
-import { configureClientTracing } from "../observability/clientTracing";
+import {
+  configureClientTracing,
+  __resetClientTracingForTests,
+} from "../observability/clientTracing";
 import { __resetWsRpcAtomClientForTests, runRpc, WsRpcAtomClient } from "./client";
 
 type WsEventType = "open" | "message" | "close" | "error";

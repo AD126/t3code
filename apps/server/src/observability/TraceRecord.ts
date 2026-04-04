@@ -1,29 +1,37 @@
-import { Cause, Exit, Option, Schema, Tracer } from "effect";
+import { Cause, Exit, Option, Predicate, Tracer } from "effect";
 
 import { compactTraceAttributes } from "./Attributes.ts";
+import { OtlpTracer } from "effect/unstable/observability";
 
-export interface EffectTraceRecord {
-  readonly type: "effect-span";
+interface TraceRecordEvent {
   readonly name: string;
+  readonly timeUnixNano: string;
+  readonly attributes: Readonly<Record<string, unknown>>;
+}
+
+interface TraceRecordLink {
+  readonly traceId: string;
+  readonly spanId: string;
+  readonly attributes: Readonly<Record<string, unknown>>;
+}
+
+interface BaseTraceRecord {
+  readonly name: string;
+  readonly kind: string;
   readonly traceId: string;
   readonly spanId: string;
   readonly parentSpanId?: string;
   readonly sampled: boolean;
-  readonly kind: Tracer.SpanKind;
   readonly startTimeUnixNano: string;
   readonly endTimeUnixNano: string;
   readonly durationMs: number;
   readonly attributes: Readonly<Record<string, unknown>>;
-  readonly events: ReadonlyArray<{
-    readonly name: string;
-    readonly timeUnixNano: string;
-    readonly attributes: Readonly<Record<string, unknown>>;
-  }>;
-  readonly links: ReadonlyArray<{
-    readonly traceId: string;
-    readonly spanId: string;
-    readonly attributes: Readonly<Record<string, unknown>>;
-  }>;
+  readonly events: ReadonlyArray<TraceRecordEvent>;
+  readonly links: ReadonlyArray<TraceRecordLink>;
+}
+
+export interface EffectTraceRecord extends BaseTraceRecord {
+  readonly type: "effect-span";
   readonly exit:
     | {
         readonly _tag: "Success";
@@ -38,32 +46,12 @@ export interface EffectTraceRecord {
       };
 }
 
-export interface OtlpTraceRecord {
+interface OtlpTraceRecord extends BaseTraceRecord {
   readonly type: "otlp-span";
-  readonly name: string;
-  readonly traceId: string;
-  readonly spanId: string;
-  readonly parentSpanId?: string;
-  readonly sampled: boolean;
-  readonly kind: string;
-  readonly startTimeUnixNano: string;
-  readonly endTimeUnixNano: string;
-  readonly durationMs: number;
-  readonly attributes: Readonly<Record<string, unknown>>;
   readonly resourceAttributes: Readonly<Record<string, unknown>>;
   readonly scope: Readonly<{
     readonly name?: string;
     readonly version?: string;
-    readonly attributes: Readonly<Record<string, unknown>>;
-  }>;
-  readonly events: ReadonlyArray<{
-    readonly name: string;
-    readonly timeUnixNano: string;
-    readonly attributes: Readonly<Record<string, unknown>>;
-  }>;
-  readonly links: ReadonlyArray<{
-    readonly traceId: string;
-    readonly spanId: string;
     readonly attributes: Readonly<Record<string, unknown>>;
   }>;
   readonly status?:
@@ -75,55 +63,6 @@ export interface OtlpTraceRecord {
 }
 
 export type TraceRecord = EffectTraceRecord | OtlpTraceRecord;
-
-const OtlpNumberishSchema = Schema.Union([Schema.String, Schema.Number]);
-type OtlpUnknownRecord = Readonly<Record<string, unknown>>;
-
-const OtlpSpanSchema = Schema.Struct({
-  traceId: Schema.optionalKey(Schema.String),
-  spanId: Schema.optionalKey(Schema.String),
-  parentSpanId: Schema.optionalKey(Schema.String),
-  name: Schema.optionalKey(Schema.String),
-  kind: Schema.optionalKey(OtlpNumberishSchema),
-  startTimeUnixNano: Schema.optionalKey(OtlpNumberishSchema),
-  endTimeUnixNano: Schema.optionalKey(OtlpNumberishSchema),
-  attributes: Schema.optionalKey(Schema.Array(Schema.Unknown)),
-  events: Schema.optionalKey(Schema.Array(Schema.Unknown)),
-  links: Schema.optionalKey(Schema.Array(Schema.Unknown)),
-  status: Schema.optionalKey(Schema.Unknown),
-  flags: Schema.optionalKey(OtlpNumberishSchema),
-});
-type OtlpSpan = typeof OtlpSpanSchema.Type;
-
-const OtlpInstrumentationScopeSchema = Schema.Struct({
-  name: Schema.optionalKey(Schema.String),
-  version: Schema.optionalKey(Schema.String),
-  attributes: Schema.optionalKey(Schema.Array(Schema.Unknown)),
-});
-
-const OtlpScopeSpansSchema = Schema.Struct({
-  scope: Schema.optionalKey(OtlpInstrumentationScopeSchema),
-  spans: Schema.Array(OtlpSpanSchema),
-});
-
-const OtlpResourceSchema = Schema.Struct({
-  attributes: Schema.optionalKey(Schema.Array(Schema.Unknown)),
-});
-
-const OtlpResourceSpansSchema = Schema.Struct({
-  resource: Schema.optionalKey(OtlpResourceSchema),
-  scopeSpans: Schema.Array(OtlpScopeSpansSchema),
-});
-
-export const OtlpTracePayloadSchema = Schema.Struct({
-  resourceSpans: Schema.Array(OtlpResourceSpansSchema),
-});
-export type OtlpTracePayload = typeof OtlpTracePayloadSchema.Type;
-
-interface OtlpKeyValue {
-  readonly key: string;
-  readonly value: unknown;
-}
 
 interface SerializableSpan {
   readonly name: string;
@@ -194,15 +133,16 @@ const SPAN_KIND_MAP: Record<number, OtlpTraceRecord["kind"]> = {
   5: "consumer",
 };
 
-export function decodeOtlpTraceRecords(payload: OtlpTracePayload): ReadonlyArray<OtlpTraceRecord> {
+export function decodeOtlpTraceRecords(
+  payload: OtlpTracer.TraceData,
+): ReadonlyArray<OtlpTraceRecord> {
   const records: Array<OtlpTraceRecord> = [];
 
   for (const resourceSpan of payload.resourceSpans) {
     const resourceAttributes = decodeAttributes(resourceSpan.resource?.attributes ?? []);
 
     for (const scopeSpan of resourceSpan.scopeSpans) {
-      const scope = scopeSpan.scope;
-      const scopeAttributes = decodeAttributes(scope?.attributes ?? []);
+      const scopeAttributes = decodeScopeAttributes(scopeSpan);
 
       for (const span of scopeSpan.spans) {
         const traceId = asNonEmptyString(span.traceId);
@@ -215,8 +155,8 @@ export function decodeOtlpTraceRecords(payload: OtlpTracePayload): ReadonlyArray
           otlpSpanToTraceRecord({
             resourceAttributes,
             scopeAttributes,
-            scopeName: asNonEmptyString(scope?.name),
-            scopeVersion: asNonEmptyString(scope?.version),
+            scopeName: decodeScopeName(scopeSpan),
+            scopeVersion: decodeScopeVersion(scopeSpan),
             span,
           }),
         );
@@ -227,12 +167,36 @@ export function decodeOtlpTraceRecords(payload: OtlpTracePayload): ReadonlyArray
   return records;
 }
 
+function decodeScopeName(scopeSpan: OtlpTracer.ScopeSpan): string | undefined {
+  if (!isRecord(scopeSpan.scope)) {
+    return undefined;
+  }
+
+  return asNonEmptyString(scopeSpan.scope.name);
+}
+
+function decodeScopeAttributes(scopeSpan: OtlpTracer.ScopeSpan): Readonly<Record<string, unknown>> {
+  if (!isRecord(scopeSpan.scope)) {
+    return {};
+  }
+
+  return decodeAttributes(asArray(scopeSpan.scope.attributes));
+}
+
+function decodeScopeVersion(scopeSpan: OtlpTracer.ScopeSpan): string | undefined {
+  if (!isRecord(scopeSpan.scope)) {
+    return undefined;
+  }
+
+  return asNonEmptyString(scopeSpan.scope.version);
+}
+
 function otlpSpanToTraceRecord(input: {
   readonly resourceAttributes: Readonly<Record<string, unknown>>;
   readonly scopeAttributes: Readonly<Record<string, unknown>>;
   readonly scopeName: string | undefined;
   readonly scopeVersion: string | undefined;
-  readonly span: OtlpSpan;
+  readonly span: OtlpTracer.ScopeSpan["spans"][number];
 }): OtlpTraceRecord {
   const startTimeUnixNano = asString(input.span.startTimeUnixNano) ?? "0";
   const endTimeUnixNano = asString(input.span.endTimeUnixNano) ?? startTimeUnixNano;
@@ -245,7 +209,7 @@ function otlpSpanToTraceRecord(input: {
     ...(asNonEmptyString(input.span.parentSpanId)
       ? { parentSpanId: asNonEmptyString(input.span.parentSpanId)! }
       : {}),
-    sampled: isSampled(input.span.flags),
+    sampled: isSampled(decodeSpanFlags(input.span)),
     kind: normalizeSpanKind(input.span.kind),
     startTimeUnixNano,
     endTimeUnixNano,
@@ -261,6 +225,14 @@ function otlpSpanToTraceRecord(input: {
     links: decodeLinks(input.span.links ?? []),
     status: decodeStatus(input.span.status),
   };
+}
+
+function decodeSpanFlags(span: OtlpTracer.ScopeSpan["spans"][number]): unknown {
+  if (!isRecord(span)) {
+    return undefined;
+  }
+
+  return span.flags;
 }
 
 function decodeStatus(input: unknown): OtlpTraceRecord["status"] {
@@ -424,10 +396,9 @@ function asArray(input: unknown): ReadonlyArray<unknown> {
   return Array.isArray(input) ? input : [];
 }
 
-function isRecord(input: unknown): input is OtlpUnknownRecord {
-  return typeof input === "object" && input !== null;
-}
+const isRecord = Predicate.isObject;
 
-function isKeyValue(input: unknown): input is OtlpKeyValue {
-  return isRecord(input) && typeof input.key === "string" && "value" in input;
-}
+const isKeyValue = Predicate.compose(
+  Predicate.isObject,
+  Predicate.and(Predicate.hasProperty("key"), Predicate.hasProperty("value")),
+);
