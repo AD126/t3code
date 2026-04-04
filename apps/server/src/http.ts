@@ -1,5 +1,5 @@
 import Mime from "@effect/platform-node/Mime";
-import { Effect, FileSystem, Layer, Option, Path } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
 import {
   HttpBody,
   HttpClient,
@@ -39,8 +39,10 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
       Effect.map((buffer) => new Uint8Array(buffer)),
     );
 
-    // Collect traces to local trace sink
-    yield* HttpServerRequest.schemaBodyJson(OtlpTracePayloadSchema).pipe(
+    // Collect traces to local trace sink (parse from already-read body bytes)
+    yield* Schema.decodeEffect(Schema.fromJsonString(OtlpTracePayloadSchema))(
+      new TextDecoder().decode(body),
+    ).pipe(
       Effect.map(decodeOtlpTraceRecords),
       Effect.flatMap(browserTraceCollector.record),
       Effect.catch((cause) => Effect.logWarning("Failed to record browser OTLP traces", { cause })),
@@ -53,7 +55,7 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
     // Forward request to remote OTLP traces endpoint
     return yield* httpClient
       .post(otlpTracesUrl, {
-        body: HttpBody.uint8Array(body),
+        body: HttpBody.uint8Array(body, "application/json"),
       })
       .pipe(
         Effect.flatMap(HttpClientResponse.filterStatusOk),
