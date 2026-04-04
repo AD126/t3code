@@ -151,9 +151,16 @@ export function decodeOtlpTraceRecords(
         records.push(
           otlpSpanToTraceRecord({
             resourceAttributes,
-            scopeAttributes: {},
+            scopeAttributes: decodeAttributes(
+              "attributes" in scopeSpan.scope && Array.isArray(scopeSpan.scope.attributes)
+                ? scopeSpan.scope.attributes
+                : [],
+            ),
             scopeName: scopeSpan.scope.name,
-            scopeVersion: undefined,
+            scopeVersion:
+              "version" in scopeSpan.scope && typeof scopeSpan.scope.version === "string"
+                ? scopeSpan.scope.version
+                : undefined,
             span,
           }),
         );
