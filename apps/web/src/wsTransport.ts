@@ -1,4 +1,4 @@
-import { Duration, Effect, Exit, ManagedRuntime, Option, Scope, Stream } from "effect";
+import { Cause, Duration, Effect, Exit, ManagedRuntime, Option, Scope, Stream } from "effect";
 
 import {
   createWsRpcProtocolLayer,
@@ -17,6 +17,13 @@ interface RequestOptions {
 }
 
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
+const NOOP: () => void = () => undefined;
+
+interface TransportSession {
+  readonly clientPromise: Promise<WsRpcProtocolClient>;
+  readonly clientScope: Scope.Closeable;
+  readonly runtime: ManagedRuntime.ManagedRuntime<RpcClient.Protocol, never>;
+}
 
 function formatErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
@@ -26,17 +33,14 @@ function formatErrorMessage(error: unknown): string {
 }
 
 export class WsTransport {
-  private readonly runtime: ManagedRuntime.ManagedRuntime<RpcClient.Protocol, never>;
-  private readonly clientScope: Scope.Closeable;
-  private readonly clientPromise: Promise<WsRpcProtocolClient>;
+  private readonly url: string | undefined;
   private disposed = false;
+  private reconnectChain: Promise<void> = Promise.resolve();
+  private session: TransportSession;
 
   constructor(url?: string) {
-    this.runtime = ManagedRuntime.make(createWsRpcProtocolLayer(url));
-    this.clientScope = this.runtime.runSync(Scope.make());
-    this.clientPromise = this.runtime.runPromise(
-      Scope.provide(this.clientScope)(makeWsRpcProtocolClient),
-    );
+    this.url = url;
+    this.session = this.createSession();
   }
 
   async request<TSuccess>(
@@ -47,8 +51,9 @@ export class WsTransport {
       throw new Error("Transport disposed");
     }
 
-    const client = await this.clientPromise;
-    return await this.runtime.runPromise(Effect.suspend(() => execute(client)));
+    const session = this.session;
+    const client = await session.clientPromise;
+    return await session.runtime.runPromise(Effect.suspend(() => execute(client)));
   }
 
   async requestStream<TValue>(
@@ -59,8 +64,9 @@ export class WsTransport {
       throw new Error("Transport disposed");
     }
 
-    const client = await this.clientPromise;
-    await this.runtime.runPromise(
+    const session = this.session;
+    const client = await session.clientPromise;
+    await session.runtime.runPromise(
       Stream.runForEach(connect(client), (value) =>
         Effect.sync(() => {
           try {
@@ -84,23 +90,112 @@ export class WsTransport {
 
     let active = true;
     let hasReceivedValue = false;
-    const retryDelayMs = options?.retryDelay ?? DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS;
-    const cancel = this.runtime.runCallback(
-      Effect.sync(() => {
-        if (!hasReceivedValue) {
+    const retryDelayMs = Duration.toMillis(
+      Duration.fromInputUnsafe(options?.retryDelay ?? DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS),
+    );
+    let cancelCurrentStream: () => void = NOOP;
+
+    void (async () => {
+      for (;;) {
+        if (!active || this.disposed) {
           return;
         }
         try {
-          options?.onResubscribe?.();
-        } catch {
-          // Swallow reconnect hook errors so the stream can recover.
+          if (hasReceivedValue) {
+            try {
+              options?.onResubscribe?.();
+            } catch {
+              // Swallow reconnect hook errors so the stream can recover.
+            }
+          }
+          const session = this.session;
+          const runningStream = this.runStreamOnSession(session, connect, listener, () => active);
+          cancelCurrentStream = runningStream.cancel;
+          await runningStream.completed;
+          cancelCurrentStream = NOOP;
+        } catch (error) {
+          cancelCurrentStream = NOOP;
+          if (!active || this.disposed) {
+            return;
+          }
+          console.warn("WebSocket RPC subscription disconnected", {
+            error: formatErrorMessage(error),
+          });
+          await sleep(retryDelayMs);
         }
-      }).pipe(
-        Effect.andThen(Effect.promise(() => this.clientPromise)),
+      }
+    })();
+
+    return () => {
+      active = false;
+      cancelCurrentStream();
+    };
+  }
+
+  async reconnect() {
+    if (this.disposed) {
+      throw new Error("Transport disposed");
+    }
+
+    const reconnectOperation = this.reconnectChain.then(async () => {
+      if (this.disposed) {
+        throw new Error("Transport disposed");
+      }
+
+      const previousSession = this.session;
+      this.session = this.createSession();
+      await this.closeSession(previousSession);
+    });
+
+    this.reconnectChain = reconnectOperation.catch(() => undefined);
+    await reconnectOperation;
+  }
+
+  async dispose() {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    await this.closeSession(this.session);
+  }
+
+  private closeSession(session: TransportSession) {
+    return session.runtime.runPromise(Scope.close(session.clientScope, Exit.void)).finally(() => {
+      session.runtime.dispose();
+    });
+  }
+
+  private createSession(): TransportSession {
+    const runtime = ManagedRuntime.make(createWsRpcProtocolLayer(this.url));
+    const clientScope = runtime.runSync(Scope.make());
+    return {
+      runtime,
+      clientScope,
+      clientPromise: runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient)),
+    };
+  }
+
+  private runStreamOnSession<TValue>(
+    session: TransportSession,
+    connect: (client: WsRpcProtocolClient) => Stream.Stream<TValue, Error, never>,
+    listener: (value: TValue) => void,
+    isActive: () => boolean,
+  ): {
+    readonly cancel: () => void;
+    readonly completed: Promise<void>;
+  } {
+    let resolveCompleted!: () => void;
+    let rejectCompleted!: (error: unknown) => void;
+    const completed = new Promise<void>((resolve, reject) => {
+      resolveCompleted = resolve;
+      rejectCompleted = reject;
+    });
+    const cancel = session.runtime.runCallback(
+      Effect.promise(() => session.clientPromise).pipe(
         Effect.flatMap((client) =>
           Stream.runForEach(connect(client), (value) =>
             Effect.sync(() => {
-              if (!active) {
+              if (!isActive()) {
                 return;
               }
               hasReceivedValue = true;
@@ -112,33 +207,27 @@ export class WsTransport {
             }),
           ),
         ),
-        Effect.catch((error) => {
-          if (!active || this.disposed) {
-            return Effect.interrupt;
-          }
-          return Effect.sync(() => {
-            console.warn("WebSocket RPC subscription disconnected", {
-              error: formatErrorMessage(error),
-            });
-          }).pipe(Effect.andThen(Effect.sleep(retryDelayMs)));
-        }),
-        Effect.forever,
       ),
+      {
+        onExit: (exit) => {
+          if (Exit.isSuccess(exit)) {
+            resolveCompleted();
+            return;
+          }
+          rejectCompleted(Cause.squash(exit.cause));
+        },
+      },
     );
 
-    return () => {
-      active = false;
-      cancel();
+    return {
+      cancel,
+      completed,
     };
   }
+}
 
-  async dispose() {
-    if (this.disposed) {
-      return;
-    }
-    this.disposed = true;
-    await this.runtime.runPromise(Scope.close(this.clientScope, Exit.void)).finally(() => {
-      this.runtime.dispose();
-    });
-  }
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
