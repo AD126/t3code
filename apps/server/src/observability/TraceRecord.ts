@@ -223,7 +223,7 @@ function decodeEvents(input: ReadonlyArray<OtlpSpanEvent>): ReadonlyArray<TraceR
 }
 
 function decodeLinks(input: ReadonlyArray<OtlpSpanLink>): ReadonlyArray<TraceRecordLink> {
-  return input.flatMap((current) => {
+  return input.map((current) => {
     const traceId = current.traceId;
     const spanId = current.spanId;
     return {
