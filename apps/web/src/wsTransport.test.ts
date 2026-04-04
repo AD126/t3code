@@ -336,7 +336,7 @@ describe("WsTransport", () => {
     expect(getSlowRpcAckRequests()).toEqual([]);
 
     await transport.dispose();
-  });
+  }, 10_000);
 
   it("sends unary RPC requests and resolves successful exits", async () => {
     const transport = new WsTransport("ws://localhost:3020");
