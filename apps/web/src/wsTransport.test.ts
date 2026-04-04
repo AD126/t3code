@@ -1,6 +1,12 @@
 import { WS_METHODS } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { getSlowRpcAckRequests, resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
+import {
+  getWsConnectionStatus,
+  getWsConnectionUiState,
+  resetWsConnectionStateForTests,
+} from "./rpc/wsConnectionState";
 import { WsTransport } from "./wsTransport";
 
 type WsEventType = "open" | "message" | "close" | "error";
@@ -53,6 +59,10 @@ class MockWebSocket {
     this.emit("message", { data, type: "message" });
   }
 
+  error() {
+    this.emit("error", { type: "error" });
+  }
+
   private emit(type: WsEventType, event?: WsEvent) {
     const listeners = this.listeners.get(type);
     if (!listeners) return;
@@ -88,7 +98,10 @@ async function waitFor(assertion: () => void, timeoutMs = 1_000): Promise<void> 
 }
 
 beforeEach(() => {
+  vi.useRealTimers();
   sockets.length = 0;
+  resetRequestLatencyStateForTests();
+  resetWsConnectionStateForTests();
 
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -102,12 +115,18 @@ beforeEach(() => {
       desktopBridge: undefined,
     },
   });
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { onLine: true },
+  });
 
   globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
 });
 
 afterEach(() => {
   globalThis.WebSocket = originalWebSocket;
+  resetRequestLatencyStateForTests();
+  resetWsConnectionStateForTests();
   vi.restoreAllMocks();
 });
 
@@ -138,6 +157,184 @@ describe("WsTransport", () => {
     });
 
     expect(getSocket().url).toBe("wss://app.example.com/ws");
+    await transport.dispose();
+  });
+
+  it("tracks initial connection failures for the app error state", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const socket = getSocket();
+    expect(getWsConnectionStatus()).toMatchObject({
+      attemptCount: 1,
+      phase: "connecting",
+      socketUrl: "ws://localhost:3020/ws",
+    });
+
+    socket.error();
+    socket.close(1006, "server unavailable");
+
+    await waitFor(() => {
+      expect(getWsConnectionStatus()).toMatchObject({
+        closeCode: 1006,
+        closeReason: "server unavailable",
+        hasConnected: false,
+        lastError: "Unable to connect to the T3 server WebSocket.",
+        phase: "disconnected",
+      });
+    });
+    expect(getWsConnectionUiState(getWsConnectionStatus())).toBe("error");
+
+    await transport.dispose();
+  });
+
+  it("surfaces reconnecting state after a live socket disconnects", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const socket = getSocket();
+    socket.open();
+
+    await waitFor(() => {
+      expect(getWsConnectionStatus()).toMatchObject({
+        hasConnected: true,
+        phase: "connected",
+      });
+    });
+
+    socket.close(1013, "try again later");
+
+    await waitFor(() => {
+      expect(getWsConnectionStatus()).toMatchObject({
+        closeReason: "try again later",
+        hasConnected: true,
+      });
+    });
+    expect(getWsConnectionUiState(getWsConnectionStatus())).toBe("reconnecting");
+
+    await transport.dispose();
+  });
+
+  it("reconnects the websocket session without disposing the transport", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstSocket = getSocket();
+    firstSocket.open();
+
+    await waitFor(() => {
+      expect(getWsConnectionStatus()).toMatchObject({
+        hasConnected: true,
+        phase: "connected",
+      });
+    });
+
+    await transport.reconnect();
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    });
+
+    const secondSocket = getSocket();
+    expect(secondSocket).not.toBe(firstSocket);
+    expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED);
+
+    const requestPromise = transport.request((client) =>
+      client[WS_METHODS.serverUpsertKeybinding]({
+        command: "terminal.toggle",
+        key: "ctrl+k",
+      }),
+    );
+
+    secondSocket.open();
+
+    await waitFor(() => {
+      expect(secondSocket.sent).toHaveLength(1);
+    });
+
+    const requestMessage = JSON.parse(secondSocket.sent[0] ?? "{}") as { id: string };
+    secondSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Exit",
+        requestId: requestMessage.id,
+        exit: {
+          _tag: "Success",
+          value: {
+            keybindings: [],
+            issues: [],
+          },
+        },
+      }),
+    );
+
+    await expect(requestPromise).resolves.toEqual({
+      keybindings: [],
+      issues: [],
+    });
+
+    await transport.dispose();
+  });
+
+  it("marks unary requests as slow until the first server ack arrives", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+
+    const requestPromise = transport.request((client) =>
+      client[WS_METHODS.serverUpsertKeybinding]({
+        command: "terminal.toggle",
+        key: "ctrl+k",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const socket = getSocket();
+    socket.open();
+
+    await waitFor(() => {
+      expect(socket.sent).toHaveLength(1);
+    });
+
+    const requestMessage = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    await waitFor(() => {
+      expect(getSlowRpcAckRequests()).toMatchObject([
+        {
+          requestId: requestMessage.id,
+          tag: WS_METHODS.serverUpsertKeybinding,
+        },
+      ]);
+    }, 5_000);
+
+    socket.serverMessage(
+      JSON.stringify({
+        _tag: "Exit",
+        requestId: requestMessage.id,
+        exit: {
+          _tag: "Success",
+          value: {
+            keybindings: [],
+            issues: [],
+          },
+        },
+      }),
+    );
+
+    await expect(requestPromise).resolves.toEqual({
+      keybindings: [],
+      issues: [],
+    });
+    expect(getSlowRpcAckRequests()).toEqual([]);
+
     await transport.dispose();
   });
 
@@ -422,8 +619,18 @@ describe("WsTransport", () => {
     };
     const transport = {
       disposed: false,
-      clientScope: {} as never,
-      runtime,
+      session: {
+        clientScope: {} as never,
+        runtime,
+      },
+      closeSession: (
+        WsTransport.prototype as unknown as {
+          closeSession: (session: {
+            clientScope: unknown;
+            runtime: { dispose: () => Promise<void>; runPromise: () => Promise<void> };
+          }) => Promise<void>;
+        }
+      ).closeSession,
     } as unknown as WsTransport;
 
     WsTransport.prototype.dispose.call(transport);

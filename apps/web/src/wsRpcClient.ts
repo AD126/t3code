@@ -10,6 +10,7 @@ import {
 import { Effect, Stream } from "effect";
 
 import { type WsRpcProtocolClient } from "./rpc/protocol";
+import { resetWsReconnectBackoff } from "./rpc/wsConnectionState";
 import { WsTransport } from "./wsTransport";
 
 type RpcTag = keyof WsRpcProtocolClient & string;
@@ -37,6 +38,7 @@ interface GitRunStackedActionOptions {
 
 export interface WsRpcClient {
   readonly dispose: () => Promise<void>;
+  readonly reconnect: () => Promise<void>;
   readonly terminal: {
     readonly open: RpcUnaryMethod<typeof WS_METHODS.terminalOpen>;
     readonly write: RpcUnaryMethod<typeof WS_METHODS.terminalWrite>;
@@ -113,6 +115,10 @@ export async function __resetWsRpcClientForTests() {
 export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
   return {
     dispose: () => transport.dispose(),
+    reconnect: async () => {
+      resetWsReconnectBackoff();
+      await transport.reconnect();
+    },
     terminal: {
       open: (input) => transport.request((client) => client[WS_METHODS.terminalOpen](input)),
       write: (input) => transport.request((client) => client[WS_METHODS.terminalWrite](input)),
