@@ -3,7 +3,7 @@ import { Atom } from "effect/unstable/reactivity";
 
 import { appAtomRegistry } from "./atomRegistry";
 
-export const SLOW_RPC_ACK_THRESHOLD_MS = 15_000;
+export const SLOW_RPC_ACK_THRESHOLD_MS = 2_500;
 export const MAX_TRACKED_RPC_ACK_REQUESTS = 256;
 
 export interface SlowRpcAckRequest {
