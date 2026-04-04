@@ -109,7 +109,15 @@ export class WsTransport {
             }
           }
           const session = this.session;
-          const runningStream = this.runStreamOnSession(session, connect, listener, () => active);
+          const runningStream = this.runStreamOnSession(
+            session,
+            connect,
+            listener,
+            () => active,
+            () => {
+              hasReceivedValue = true;
+            },
+          );
           cancelCurrentStream = runningStream.cancel;
           await runningStream.completed;
           cancelCurrentStream = NOOP;
@@ -180,6 +188,7 @@ export class WsTransport {
     connect: (client: WsRpcProtocolClient) => Stream.Stream<TValue, Error, never>,
     listener: (value: TValue) => void,
     isActive: () => boolean,
+    markValueReceived: () => void,
   ): {
     readonly cancel: () => void;
     readonly completed: Promise<void>;
@@ -198,7 +207,7 @@ export class WsTransport {
               if (!isActive()) {
                 return;
               }
-              hasReceivedValue = true;
+              markValueReceived();
               try {
                 listener(value);
               } catch {
