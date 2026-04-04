@@ -46,6 +46,13 @@ const firstNonEmptyString = (...values: unknown[]): string => {
   throw new Error("No non-empty string provided");
 };
 
+export function formatErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return globalThis.String(error);
+}
+
 export const resolveServerUrl = (options?: {
   url?: string | undefined;
   protocol?: "http" | "https" | "ws" | "wss" | undefined;

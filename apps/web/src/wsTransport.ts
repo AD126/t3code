@@ -7,6 +7,7 @@ import {
 } from "./rpc/protocol";
 import { RpcClient } from "effect/unstable/rpc";
 import { ClientTracingLive, configureClientTracing } from "./observability/clientTracing";
+import { formatErrorMessage } from "./lib/utils";
 
 interface SubscribeOptions {
   readonly retryDelay?: Duration.Input;
@@ -17,13 +18,6 @@ interface RequestOptions {
 }
 
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
-
-function formatErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-  return String(error);
-}
 
 export class WsTransport {
   private readonly runtime: ManagedRuntime.ManagedRuntime<RpcClient.Protocol, never>;

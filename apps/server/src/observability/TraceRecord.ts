@@ -137,11 +137,20 @@ export function decodeOtlpTraceRecords(
   payload: OtlpTracer.TraceData,
 ): ReadonlyArray<OtlpTraceRecord> {
   const records: Array<OtlpTraceRecord> = [];
+  const resourceSpans = isRecord(payload) ? asArray(payload.resourceSpans) : [];
 
-  for (const resourceSpan of payload.resourceSpans) {
+  for (const rs of resourceSpans) {
+    if (!isRecord(rs)) {
+      continue;
+    }
+    const resourceSpan = rs as unknown as OtlpTracer.ResourceSpan;
     const resourceAttributes = decodeAttributes(resourceSpan.resource?.attributes ?? []);
 
-    for (const scopeSpan of resourceSpan.scopeSpans) {
+    for (const ss of asArray(resourceSpan.scopeSpans)) {
+      if (!isRecord(ss)) {
+        continue;
+      }
+      const scopeSpan = ss as unknown as OtlpTracer.ScopeSpan;
       const scopeAttributes = decodeScopeAttributes(scopeSpan);
 
       for (const span of scopeSpan.spans) {

@@ -3,7 +3,7 @@ import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 
 import { isElectron } from "../env";
-import { resolveServerUrl } from "../lib/utils";
+import { formatErrorMessage, resolveServerUrl } from "../lib/utils";
 import { APP_VERSION } from "~/branding";
 
 const DEFAULT_EXPORT_INTERVAL_MS = 1_000;
@@ -46,7 +46,10 @@ export function configureClientTracing(config: ClientTracingConfig = {}): Promis
   if (config.exportIntervalMs === undefined && activeConfigKey !== null) {
     return pendingConfiguration;
   }
-  pendingConfiguration = pendingConfiguration.finally(() => applyClientTracingConfig(config));
+  pendingConfiguration = pendingConfiguration.then(
+    () => applyClientTracingConfig(config),
+    () => applyClientTracingConfig(config),
+  );
   return pendingConfiguration;
 }
 
@@ -101,7 +104,7 @@ async function applyClientTracingConfig(config: ClientTracingConfig): Promise<vo
 
     if (generation === configurationGeneration) {
       console.warn("Failed to configure client tracing exporter", {
-        error: formatError(error),
+        error: formatErrorMessage(error),
         otlpTracesUrl,
       });
     }
@@ -122,14 +125,6 @@ async function disposeTracerRuntime(
     .finally(() => {
       runtime.dispose();
     });
-}
-
-function formatError(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-
-  return String(error);
 }
 
 export async function __resetClientTracingForTests() {
