@@ -37,7 +37,14 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
     const httpClient = yield* HttpClient.HttpClient;
     const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
 
-    yield* browserTraceCollector.record(decodeOtlpTraceRecords(bodyJson));
+    yield* Effect.try({
+      try: () => decodeOtlpTraceRecords(bodyJson),
+      catch: (cause) =>
+        Effect.logWarning("Failed to decode browser OTLP traces", {
+          cause,
+          bodyJson,
+        }),
+    }).pipe(Effect.flatMap((records) => browserTraceCollector.record(records)));
 
     if (otlpTracesUrl === undefined) {
       return HttpServerResponse.empty({ status: 204 });
