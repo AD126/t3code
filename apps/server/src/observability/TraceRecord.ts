@@ -1,7 +1,7 @@
-import { Cause, Exit, Option, Predicate, Tracer } from "effect";
+import { Cause, Exit, Option, Tracer } from "effect";
 
 import { compactTraceAttributes } from "./Attributes.ts";
-import { OtlpTracer } from "effect/unstable/observability";
+import { OtlpResource, OtlpTracer } from "effect/unstable/observability";
 
 interface TraceRecordEvent {
   readonly name: string;
@@ -63,6 +63,11 @@ interface OtlpTraceRecord extends BaseTraceRecord {
 }
 
 export type TraceRecord = EffectTraceRecord | OtlpTraceRecord;
+
+type OtlpSpan = OtlpTracer.ScopeSpan["spans"][number];
+type OtlpSpanEvent = OtlpSpan["events"][number];
+type OtlpSpanLink = OtlpSpan["links"][number];
+type OtlpSpanStatus = OtlpSpan["status"];
 
 interface SerializableSpan {
   readonly name: string;
@@ -142,21 +147,13 @@ export function decodeOtlpTraceRecords(
     const resourceAttributes = decodeAttributes(resourceSpan.resource?.attributes ?? []);
 
     for (const scopeSpan of resourceSpan.scopeSpans) {
-      const scopeAttributes = decodeScopeAttributes(scopeSpan);
-
       for (const span of scopeSpan.spans) {
-        const traceId = asNonEmptyString(span.traceId);
-        const spanId = asNonEmptyString(span.spanId);
-        if (!traceId || !spanId) {
-          continue;
-        }
-
         records.push(
           otlpSpanToTraceRecord({
             resourceAttributes,
-            scopeAttributes,
-            scopeName: decodeScopeName(scopeSpan),
-            scopeVersion: decodeScopeVersion(scopeSpan),
+            scopeAttributes: {},
+            scopeName: scopeSpan.scope.name,
+            scopeVersion: undefined,
             span,
           }),
         );
@@ -167,150 +164,84 @@ export function decodeOtlpTraceRecords(
   return records;
 }
 
-function decodeScopeName(scopeSpan: OtlpTracer.ScopeSpan): string | undefined {
-  if (!isRecord(scopeSpan.scope)) {
-    return undefined;
-  }
-
-  return asNonEmptyString(scopeSpan.scope.name);
-}
-
-function decodeScopeAttributes(scopeSpan: OtlpTracer.ScopeSpan): Readonly<Record<string, unknown>> {
-  if (!isRecord(scopeSpan.scope)) {
-    return {};
-  }
-
-  return decodeAttributes(asArray(scopeSpan.scope.attributes));
-}
-
-function decodeScopeVersion(scopeSpan: OtlpTracer.ScopeSpan): string | undefined {
-  if (!isRecord(scopeSpan.scope)) {
-    return undefined;
-  }
-
-  return asNonEmptyString(scopeSpan.scope.version);
-}
-
 function otlpSpanToTraceRecord(input: {
   readonly resourceAttributes: Readonly<Record<string, unknown>>;
   readonly scopeAttributes: Readonly<Record<string, unknown>>;
   readonly scopeName: string | undefined;
   readonly scopeVersion: string | undefined;
-  readonly span: OtlpTracer.ScopeSpan["spans"][number];
+  readonly span: OtlpSpan;
 }): OtlpTraceRecord {
-  const startTimeUnixNano = asString(input.span.startTimeUnixNano) ?? "0";
-  const endTimeUnixNano = asString(input.span.endTimeUnixNano) ?? startTimeUnixNano;
-
   return {
     type: "otlp-span",
-    name: asNonEmptyString(input.span.name) ?? "unknown",
-    traceId: asNonEmptyString(input.span.traceId) ?? "",
-    spanId: asNonEmptyString(input.span.spanId) ?? "",
-    ...(asNonEmptyString(input.span.parentSpanId)
-      ? { parentSpanId: asNonEmptyString(input.span.parentSpanId)! }
-      : {}),
-    sampled: isSampled(decodeSpanFlags(input.span)),
+    name: input.span.name,
+    traceId: input.span.traceId,
+    spanId: input.span.spanId,
+    ...(input.span.parentSpanId ? { parentSpanId: input.span.parentSpanId } : {}),
+    sampled: true,
     kind: normalizeSpanKind(input.span.kind),
-    startTimeUnixNano,
-    endTimeUnixNano,
-    durationMs: Number(parseBigInt(endTimeUnixNano) - parseBigInt(startTimeUnixNano)) / 1_000_000,
-    attributes: decodeAttributes(input.span.attributes ?? []),
+    startTimeUnixNano: input.span.startTimeUnixNano,
+    endTimeUnixNano: input.span.endTimeUnixNano,
+    durationMs:
+      Number(parseBigInt(input.span.endTimeUnixNano) - parseBigInt(input.span.startTimeUnixNano)) /
+      1_000_000,
+    attributes: decodeAttributes(input.span.attributes),
     resourceAttributes: input.resourceAttributes,
     scope: {
       ...(input.scopeName ? { name: input.scopeName } : {}),
       ...(input.scopeVersion ? { version: input.scopeVersion } : {}),
       attributes: input.scopeAttributes,
     },
-    events: decodeEvents(input.span.events ?? []),
-    links: decodeLinks(input.span.links ?? []),
+    events: decodeEvents(input.span.events),
+    links: decodeLinks(input.span.links),
     status: decodeStatus(input.span.status),
   };
 }
 
-function decodeSpanFlags(span: OtlpTracer.ScopeSpan["spans"][number]): unknown {
-  if (!isRecord(span)) {
-    return undefined;
-  }
-
-  return span.flags;
-}
-
-function decodeStatus(input: unknown): OtlpTraceRecord["status"] {
-  if (!isRecord(input)) {
-    return undefined;
-  }
-
-  const code = asNonEmptyString(input.code) ?? asString(input.code);
-  const message = asNonEmptyString(input.message);
-  if (!code && !message) {
-    return undefined;
-  }
+function decodeStatus(input: OtlpSpanStatus): OtlpTraceRecord["status"] {
+  const code = String(input.code);
+  const message = input.message;
 
   return {
-    ...(code ? { code } : {}),
+    code,
     ...(message ? { message } : {}),
   };
 }
 
-function decodeEvents(input: ReadonlyArray<unknown>): OtlpTraceRecord["events"] {
-  return input.flatMap((current) => {
-    if (!isRecord(current)) {
-      return [];
-    }
+function decodeEvents(input: ReadonlyArray<OtlpSpanEvent>): ReadonlyArray<TraceRecordEvent> {
+  return input.map((current) => ({
+    name: current.name,
+    timeUnixNano: current.timeUnixNano,
+    attributes: decodeAttributes(current.attributes),
+  }));
+}
 
-    return [
-      {
-        name: asNonEmptyString(current.name) ?? "event",
-        timeUnixNano: asString(current.timeUnixNano) ?? "0",
-        attributes: decodeAttributes(asArray(current.attributes)),
-      },
-    ];
+function decodeLinks(input: ReadonlyArray<OtlpSpanLink>): ReadonlyArray<TraceRecordLink> {
+  return input.flatMap((current) => {
+    const traceId = current.traceId;
+    const spanId = current.spanId;
+    return {
+      traceId,
+      spanId,
+      attributes: decodeAttributes(current.attributes),
+    };
   });
 }
 
-function decodeLinks(input: ReadonlyArray<unknown>): OtlpTraceRecord["links"] {
-  return input.flatMap((current) => {
-    if (!isRecord(current)) {
-      return [];
-    }
-
-    const traceId = asNonEmptyString(current.traceId);
-    const spanId = asNonEmptyString(current.spanId);
-    if (!traceId || !spanId) {
-      return [];
-    }
-
-    return [
-      {
-        traceId,
-        spanId,
-        attributes: decodeAttributes(asArray(current.attributes)),
-      },
-    ];
-  });
-}
-
-function decodeAttributes(input: ReadonlyArray<unknown>): Readonly<Record<string, unknown>> {
+function decodeAttributes(
+  input: ReadonlyArray<OtlpResource.KeyValue>,
+): Readonly<Record<string, unknown>> {
   const entries: Record<string, unknown> = {};
 
   for (const attribute of input) {
-    if (!isKeyValue(attribute)) {
-      continue;
-    }
-
-    const key = asNonEmptyString(attribute.key);
-    if (!key) {
-      continue;
-    }
-    entries[key] = decodeValue(attribute.value);
+    entries[attribute.key] = decodeValue(attribute.value);
   }
 
   return compactTraceAttributes(entries);
 }
 
-function decodeValue(input: unknown): unknown {
-  if (!isRecord(input)) {
-    return input ?? null;
+function decodeValue(input: OtlpResource.AnyValue | null | undefined): unknown {
+  if (input == null) {
+    return null;
   }
   if ("stringValue" in input) {
     return input.stringValue;
@@ -319,7 +250,7 @@ function decodeValue(input: unknown): unknown {
     return input.boolValue;
   }
   if ("intValue" in input) {
-    return normalizeInteger(input.intValue);
+    return input.intValue;
   }
   if ("doubleValue" in input) {
     return input.doubleValue;
@@ -327,46 +258,17 @@ function decodeValue(input: unknown): unknown {
   if ("bytesValue" in input) {
     return input.bytesValue;
   }
-  if (isRecord(input.arrayValue)) {
-    return asArray(input.arrayValue.values).map((entry) => decodeValue(entry));
+  if (input.arrayValue) {
+    return input.arrayValue.values.map((entry) => decodeValue(entry));
   }
-  if (isRecord(input.kvlistValue)) {
-    return decodeAttributes(asArray(input.kvlistValue.values));
+  if (input.kvlistValue) {
+    return decodeAttributes(input.kvlistValue.values);
   }
   return null;
 }
 
-function normalizeInteger(input: unknown): number | string {
-  if (typeof input === "number") {
-    return input;
-  }
-  if (typeof input !== "string") {
-    return String(input ?? "");
-  }
-
-  const parsed = Number(input);
-  return Number.isSafeInteger(parsed) ? parsed : input;
-}
-
-function normalizeSpanKind(input: unknown): OtlpTraceRecord["kind"] {
-  if (typeof input === "string" && input.trim().length > 0) {
-    return input.trim().toLowerCase();
-  }
-  if (typeof input === "number") {
-    return SPAN_KIND_MAP[input] ?? "internal";
-  }
-  return "internal";
-}
-
-function isSampled(input: unknown): boolean {
-  if (typeof input === "number") {
-    return (input & 0x01) === 0x01;
-  }
-  if (typeof input === "string") {
-    const parsed = Number(input);
-    return Number.isNaN(parsed) ? true : (parsed & 0x01) === 0x01;
-  }
-  return true;
+function normalizeSpanKind(input: number): OtlpTraceRecord["kind"] {
+  return SPAN_KIND_MAP[input] || "internal";
 }
 
 function parseBigInt(input: string): bigint {
@@ -376,29 +278,3 @@ function parseBigInt(input: string): bigint {
     return 0n;
   }
 }
-
-function asString(input: unknown): string | undefined {
-  if (typeof input === "string") {
-    return input;
-  }
-  if (typeof input === "number") {
-    return String(input);
-  }
-  return undefined;
-}
-
-function asNonEmptyString(input: unknown): string | undefined {
-  const value = asString(input)?.trim();
-  return value ? value : undefined;
-}
-
-function asArray(input: unknown): ReadonlyArray<unknown> {
-  return Array.isArray(input) ? input : [];
-}
-
-const isRecord = Predicate.isObject;
-
-const isKeyValue = Predicate.compose(
-  Predicate.isObject,
-  Predicate.and(Predicate.hasProperty("key"), Predicate.hasProperty("value")),
-);
