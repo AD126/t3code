@@ -30,6 +30,7 @@ import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import { showDesktopConfirmDialog } from "./confirmDialog";
+import { resolveLaunchProjectPath } from "./launchProjectPath";
 import { syncShellEnvironment } from "./syncShellEnvironment";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
 import {
@@ -102,6 +103,10 @@ let desktopLogSink: RotatingFileSink | null = null;
 let backendLogSink: RotatingFileSink | null = null;
 let restoreStdIoCapture: (() => void) | null = null;
 let backendObservabilitySettings = readPersistedBackendObservabilitySettings();
+let pendingLaunchProjectPath = resolveLaunchProjectPath({
+  args: process.argv.slice(app.isPackaged ? 1 : 2),
+  cwd: process.cwd(),
+});
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
 const expectedBackendExitChildren = new WeakSet<ChildProcess.ChildProcess>();
@@ -1015,7 +1020,15 @@ function startBackend(): void {
   }
 
   const captureBackendLogs = app.isPackaged && backendLogSink !== null;
-  const child = ChildProcess.spawn(process.execPath, [backendEntry, "--bootstrap-fd", "3"], {
+  const launchProjectPath = pendingLaunchProjectPath;
+  pendingLaunchProjectPath = null;
+  const childArgs = [
+    backendEntry,
+    "--bootstrap-fd",
+    "3",
+    ...(launchProjectPath ? [launchProjectPath] : []),
+  ];
+  const child = ChildProcess.spawn(process.execPath, childArgs, {
     cwd: resolveBackendCwd(),
     // In Electron main, process.execPath points to the Electron binary.
     // Run the child in Node mode so this backend process does not become a GUI app instance.
@@ -1036,6 +1049,7 @@ function startBackend(): void {
         port: backendPort,
         t3Home: BASE_DIR,
         authToken: backendAuthToken,
+        ...(launchProjectPath ? { autoBootstrapProjectFromCwd: true } : {}),
         ...(backendObservabilitySettings.otlpTracesUrl
           ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
           : {}),
@@ -1059,7 +1073,9 @@ function startBackend(): void {
   };
   writeBackendSessionBoundary(
     "START",
-    `pid=${child.pid ?? "unknown"} port=${backendPort} cwd=${resolveBackendCwd()}`,
+    `pid=${child.pid ?? "unknown"} port=${backendPort} cwd=${resolveBackendCwd()}${
+      launchProjectPath ? ` launchProjectPath=${launchProjectPath}` : ""
+    }`,
   );
   captureBackendOutput(child);
 

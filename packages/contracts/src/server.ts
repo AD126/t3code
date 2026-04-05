@@ -170,11 +170,17 @@ export const ServerLifecycleReadyPayload = Schema.Struct({
 });
 export type ServerLifecycleReadyPayload = typeof ServerLifecycleReadyPayload.Type;
 
+export const ServerLifecycleBootstrapThreadKind = Schema.Literals(["persisted", "draft"]);
+export type ServerLifecycleBootstrapThreadKind = typeof ServerLifecycleBootstrapThreadKind.Type;
+
 export const ServerLifecycleWelcomePayload = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   projectName: TrimmedNonEmptyString,
   bootstrapProjectId: Schema.optional(ProjectId),
   bootstrapThreadId: Schema.optional(ThreadId),
+  bootstrapThreadKind: Schema.optionalKey(
+    ServerLifecycleBootstrapThreadKind.pipe(Schema.withDecodingDefault(() => "persisted")),
+  ),
 });
 export type ServerLifecycleWelcomePayload = typeof ServerLifecycleWelcomePayload.Type;
 

@@ -48,6 +48,7 @@ import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 import { deriveReplayRetryDecision } from "../orchestrationRecovery";
+import { activateProjectDraftThread } from "../projectDraftThreadActivation";
 import { getWsRpcClient } from "~/wsRpcClient";
 
 export const Route = createRootRouteWithContext<{
@@ -250,11 +251,25 @@ function EventRouter() {
       if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
         return;
       }
-      await navigate({
-        to: "/$threadId",
-        params: { threadId: payload.bootstrapThreadId },
-        replace: true,
-      });
+
+      if (payload.bootstrapThreadKind === "draft") {
+        await activateProjectDraftThread({
+          projectId: payload.bootstrapProjectId,
+          threadId: payload.bootstrapThreadId,
+          navigate: (threadId) =>
+            navigate({
+              to: "/$threadId",
+              params: { threadId },
+              replace: true,
+            }),
+        });
+      } else {
+        await navigate({
+          to: "/$threadId",
+          params: { threadId: payload.bootstrapThreadId },
+          replace: true,
+        });
+      }
       handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
     })().catch(() => undefined);
   });

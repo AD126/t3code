@@ -4,6 +4,7 @@ import { Config, Effect, FileSystem, LogLevel, Option, Path, Schema } from "effe
 import { Argument, Command, Flag, GlobalFlag } from "effect/unstable/cli";
 
 import {
+  BootstrapLaunchMode,
   DEFAULT_PORT,
   deriveServerPaths,
   ensureServerDirectories,
@@ -291,6 +292,9 @@ export const resolveServerConfig = (
       () => (mode === "desktop" ? "127.0.0.1" : undefined),
     );
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
+    const bootstrapLaunchMode: BootstrapLaunchMode = Option.isSome(flags.cwd)
+      ? "explicit-cwd"
+      : "default";
 
     const config: ServerConfigShape = {
       logLevel,
@@ -330,6 +334,7 @@ export const resolveServerConfig = (
       authToken,
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
+      bootstrapLaunchMode,
     };
 
     return config;

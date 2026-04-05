@@ -21,6 +21,14 @@ npx t3
 
 Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
 
+After installing the desktop app, you can launch it from your terminal with a project path:
+
+```bash
+t3code .
+```
+
+That opens the desktop app, adds the directory as a project if needed, and focuses a fresh thread in that project.
+
 #### Windows (`winget`)
 
 ```bash

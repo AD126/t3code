@@ -148,7 +148,7 @@ export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
   Effect.asVoid,
 );
 
-const autoBootstrapWelcome = Effect.gen(function* () {
+export const prepareAutoBootstrapWelcome = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -156,6 +156,7 @@ const autoBootstrapWelcome = Effect.gen(function* () {
 
   let bootstrapProjectId: ProjectId | undefined;
   let bootstrapThreadId: ThreadId | undefined;
+  let bootstrapThreadKind: "persisted" | "draft" | undefined;
 
   if (serverConfig.autoBootstrapProjectFromCwd) {
     yield* Effect.gen(function* () {
@@ -190,6 +191,13 @@ const autoBootstrapWelcome = Effect.gen(function* () {
         };
       }
 
+      if (serverConfig.bootstrapLaunchMode === "explicit-cwd") {
+        bootstrapProjectId = nextProjectId;
+        bootstrapThreadId = ThreadId.makeUnsafe(crypto.randomUUID());
+        bootstrapThreadKind = "draft";
+        return;
+      }
+
       const existingThreadId =
         yield* projectionReadModelQuery.getFirstActiveThreadIdByProjectId(nextProjectId);
       if (Option.isNone(existingThreadId)) {
@@ -210,10 +218,13 @@ const autoBootstrapWelcome = Effect.gen(function* () {
         });
         bootstrapProjectId = nextProjectId;
         bootstrapThreadId = createdThreadId;
-      } else {
-        bootstrapProjectId = nextProjectId;
-        bootstrapThreadId = existingThreadId.value;
+        bootstrapThreadKind = "persisted";
+        return;
       }
+
+      bootstrapProjectId = nextProjectId;
+      bootstrapThreadId = existingThreadId.value;
+      bootstrapThreadKind = "persisted";
     });
   }
 
@@ -225,6 +236,7 @@ const autoBootstrapWelcome = Effect.gen(function* () {
     projectName,
     ...(bootstrapProjectId ? { bootstrapProjectId } : {}),
     ...(bootstrapThreadId ? { bootstrapThreadId } : {}),
+    ...(bootstrapThreadKind ? { bootstrapThreadKind } : {}),
   } as const;
 });
 
@@ -307,12 +319,13 @@ const makeServerRuntimeStartup = Effect.gen(function* () {
     );
 
     yield* Effect.logDebug("startup phase: preparing welcome payload");
-    const welcome = yield* runStartupPhase("welcome.prepare", autoBootstrapWelcome);
+    const welcome = yield* runStartupPhase("welcome.prepare", prepareAutoBootstrapWelcome);
     yield* Effect.logDebug("startup phase: publishing welcome event", {
       cwd: welcome.cwd,
       projectName: welcome.projectName,
       bootstrapProjectId: welcome.bootstrapProjectId,
       bootstrapThreadId: welcome.bootstrapThreadId,
+      bootstrapThreadKind: welcome.bootstrapThreadKind,
     });
     yield* runStartupPhase(
       "welcome.publish",

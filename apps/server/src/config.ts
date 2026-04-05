@@ -13,6 +13,9 @@ export const DEFAULT_PORT = 3773;
 export const RuntimeMode = Schema.Literals(["web", "desktop"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 
+export const BootstrapLaunchMode = Schema.Literals(["default", "explicit-cwd"]);
+export type BootstrapLaunchMode = typeof BootstrapLaunchMode.Type;
+
 /**
  * ServerDerivedPaths - Derived paths from the base directory.
  */
@@ -57,6 +60,7 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly authToken: string | undefined;
   readonly autoBootstrapProjectFromCwd: boolean;
   readonly logWebSocketEvents: boolean;
+  readonly bootstrapLaunchMode: BootstrapLaunchMode;
 }
 
 export const deriveServerPaths = Effect.fn(function* (
@@ -149,6 +153,7 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
           staticDir: undefined,
           devUrl,
           noBrowser: false,
+          bootstrapLaunchMode: "default",
         } satisfies ServerConfigShape;
       }),
     );

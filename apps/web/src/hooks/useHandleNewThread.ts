@@ -1,4 +1,4 @@
-import { DEFAULT_RUNTIME_MODE, type ProjectId, ThreadId } from "@t3tools/contracts";
+import { type ProjectId, ThreadId } from "@t3tools/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -9,6 +9,7 @@ import {
 } from "../composerDraftStore";
 import { newThreadId } from "../lib/utils";
 import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
+import { activateProjectDraftThread } from "../projectDraftThreadActivation";
 import { useStore } from "../store";
 import { useThreadById } from "../storeSelectors";
 import { useUiStateStore } from "../uiStateStore";
@@ -46,7 +47,6 @@ export function useHandleNewThread() {
         clearProjectDraftThreadId,
         getDraftThread,
         getDraftThreadByProjectId,
-        applyStickyState,
         setDraftThreadContext,
         setProjectDraftThreadId,
       } = useComposerDraftStore.getState();
@@ -96,22 +96,18 @@ export function useHandleNewThread() {
       }
 
       const threadId = newThreadId();
-      const createdAt = new Date().toISOString();
-      return (async () => {
-        setProjectDraftThreadId(projectId, threadId, {
-          createdAt,
-          branch: options?.branch ?? null,
-          worktreePath: options?.worktreePath ?? null,
-          envMode: options?.envMode ?? "local",
-          runtimeMode: DEFAULT_RUNTIME_MODE,
-        });
-        applyStickyState(threadId);
-
-        await navigate({
-          to: "/$threadId",
-          params: { threadId },
-        });
-      })();
+      return activateProjectDraftThread({
+        projectId,
+        threadId,
+        branch: options?.branch ?? null,
+        worktreePath: options?.worktreePath ?? null,
+        envMode: options?.envMode ?? "local",
+        navigate: (nextThreadId) =>
+          navigate({
+            to: "/$threadId",
+            params: { threadId: nextThreadId },
+          }),
+      });
     },
     [navigate, routeThreadId],
   );

@@ -197,6 +197,7 @@ describe("serverState", () => {
         projectName: "t3-code",
         bootstrapProjectId: ProjectId.makeUnsafe("project-1"),
         bootstrapThreadId: ThreadId.makeUnsafe("thread-1"),
+        bootstrapThreadKind: "draft",
       },
     });
 
@@ -205,6 +206,7 @@ describe("serverState", () => {
       projectName: "t3-code",
       bootstrapProjectId: ProjectId.makeUnsafe("project-1"),
       bootstrapThreadId: ThreadId.makeUnsafe("thread-1"),
+      bootstrapThreadKind: "draft",
     });
 
     const lateListener = vi.fn();
@@ -214,6 +216,7 @@ describe("serverState", () => {
       projectName: "t3-code",
       bootstrapProjectId: ProjectId.makeUnsafe("project-1"),
       bootstrapThreadId: ThreadId.makeUnsafe("thread-1"),
+      bootstrapThreadKind: "draft",
     });
 
     unsubscribeLate();

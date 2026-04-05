@@ -88,6 +88,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         authToken: "env-token",
         autoBootstrapProjectFromCwd: false,
         logWebSocketEvents: true,
+        bootstrapLaunchMode: "default",
       });
     }),
   );
@@ -151,6 +152,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         authToken: "flag-token",
         autoBootstrapProjectFromCwd: true,
         logWebSocketEvents: true,
+        bootstrapLaunchMode: "default",
       });
     }),
   );
@@ -221,6 +223,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         authToken: "bootstrap-token",
         autoBootstrapProjectFromCwd: false,
         logWebSocketEvents: true,
+        bootstrapLaunchMode: "default",
       });
       assert.equal(join(baseDir, "dev"), resolved.stateDir);
     }),
@@ -271,6 +274,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         expect(yield* fs.exists(directory)).toBe(true);
       }
       expect(resolved.cwd).toBe(path.resolve(customCwd));
+      expect(resolved.bootstrapLaunchMode).toBe("explicit-cwd");
     }),
   );
 
@@ -341,6 +345,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         authToken: "flag-token",
         autoBootstrapProjectFromCwd: true,
         logWebSocketEvents: true,
+        bootstrapLaunchMode: "default",
       });
     }),
   );
@@ -405,6 +410,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         authToken: undefined,
         autoBootstrapProjectFromCwd: false,
         logWebSocketEvents: false,
+        bootstrapLaunchMode: "default",
       });
     }),
   );
